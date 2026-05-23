@@ -99,43 +99,45 @@ def _write_cf_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: 
 # ── Provisioning ─────────────────────────────────────────────────────
 
 async def provision_free(name: str, local_port: int) -> dict:
-    """Start cloudflared quick tunnel, parse the assigned trycloudflare.com URL."""
+    """Start cloudflared quick tunnel, get URL from metrics API."""
     tunnel_id = f"free-{int(time.time())}"
+    metrics_port = 20242 + (int(time.time()) % 1000)  # avoid collisions on restart
 
     proc = await asyncio.create_subprocess_exec(
-        "cloudflared", "tunnel", "--url", f"http://localhost:{local_port}",
+        "cloudflared", "tunnel",
+        "--url", f"http://localhost:{local_port}",
         "--no-autoupdate",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        "--metrics", f"127.0.0.1:{metrics_port}",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
     )
 
-    # cloudflared prints the URL to stderr — read until we find it (30s timeout)
+    # Poll /quicktunnel on metrics server until hostname appears (max 30s)
     tunnel_url = None
     loop = asyncio.get_event_loop()
     deadline = loop.time() + 30
 
-    while loop.time() < deadline:
-        remaining = deadline - loop.time()
-        try:
-            line_bytes = await asyncio.wait_for(proc.stderr.readline(), timeout=min(remaining, 3))
-        except asyncio.TimeoutError:
-            break
-        if not line_bytes:
-            break
-        line = line_bytes.decode(errors="replace")
-        m = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', line)
-        if m:
-            tunnel_url = m.group(0)
-            break
+    async with ClientSession() as session:
+        while loop.time() < deadline:
+            await asyncio.sleep(1)
+            try:
+                async with session.get(f"http://127.0.0.1:{metrics_port}/quicktunnel", timeout=2) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        hostname = data.get("hostname", "")
+                        if hostname:
+                            tunnel_url = f"https://{hostname}"
+                            break
+            except Exception:
+                pass  # metrics server not up yet
 
     if not tunnel_url:
         proc.terminate()
-        raise RuntimeError("cloudflared did not return a tunnel URL within 30s — is it installed?")
+        raise RuntimeError("cloudflared did not produce a tunnel URL within 30s")
 
-    # Keep process alive (already stored before it exits)
     _procs[tunnel_id] = proc
 
-    subdomain = re.sub(r'https://|\.trycloudflare\.com', '', tunnel_url)
+    subdomain = tunnel_url.replace("https://", "").replace(".trycloudflare.com", "")
     return {
         "id": tunnel_id,
         "name": name or "Home Assistant",
