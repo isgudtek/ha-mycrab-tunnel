@@ -14,7 +14,7 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/cloudflared
 
 # Python deps
-RUN pip3 install --no-cache-dir aiohttp aiofiles
+RUN pip3 install --no-cache-dir --break-system-packages aiohttp aiofiles
 
 COPY app/ /app/
 COPY run.sh /run.sh
