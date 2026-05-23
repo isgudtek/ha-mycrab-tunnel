@@ -98,21 +98,32 @@ def _write_cf_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: 
 
 # ── Provisioning ─────────────────────────────────────────────────────
 
+async def _drain_to_log(pipe, log_path: str):
+    """Drain asyncio StreamReader to file with explicit flush to avoid buffer deadlock."""
+    with open(log_path, "wb") as f:
+        while True:
+            data = await pipe.read(256)
+            if not data:
+                break
+            f.write(data)
+            f.flush()
+
+
 async def provision_free(name: str, local_port: int) -> dict:
-    """Start cloudflared quick tunnel, parse URL from log output."""
+    """Start cloudflared quick tunnel, parse URL from drained pipe log."""
     tunnel_id = f"free-{int(time.time())}"
     log_path = f"/tmp/cf-{tunnel_id}.log"
-    log_file = open(log_path, "wb")
 
     proc = await asyncio.create_subprocess_exec(
         "cloudflared", "tunnel",
         "--url", f"http://localhost:{local_port}",
         "--no-autoupdate",
-        stdout=log_file,
-        stderr=log_file,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
+    asyncio.create_task(_drain_to_log(proc.stdout, log_path))
 
-    # Poll log file for the trycloudflare.com URL (printed within ~5s usually)
+    # Poll log file for the trycloudflare.com URL (printed within ~10s)
     tunnel_url = None
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 60
@@ -120,8 +131,7 @@ async def provision_free(name: str, local_port: int) -> dict:
     while loop.time() < deadline:
         await asyncio.sleep(2)
         if proc.returncode is not None:
-            log_file.close()
-            detail = Path(log_path).read_text()[-300:].strip()
+            detail = Path(log_path).read_text(errors="replace")[-300:].strip() if Path(log_path).exists() else ""
             raise RuntimeError(f"Tunnel process exited: {detail}")
         try:
             log_text = Path(log_path).read_text(errors="replace")
@@ -132,7 +142,6 @@ async def provision_free(name: str, local_port: int) -> dict:
         except Exception:
             pass
 
-    log_file.close()
     if not tunnel_url:
         proc.terminate()
         detail = Path(log_path).read_text(errors="replace")[-300:].strip() if Path(log_path).exists() else "no output"
