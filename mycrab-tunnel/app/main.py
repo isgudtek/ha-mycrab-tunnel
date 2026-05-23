@@ -321,7 +321,14 @@ async def api_update_port(request):
         if t["id"] == tid:
             t["local_port"] = new_port
             _stop_proc(tid)
-            _write_paid_config(tid, t["subdomain"], new_port, "")
+            if t.get("tier") == "free":
+                # Re-read uuid from existing creds, rewrite config
+                creds_path = DATA_DIR / f"{tid}-creds.json"
+                if creds_path.exists():
+                    creds = json.loads(creds_path.read_text())
+                    _write_free_config(tid, creds.get("TunnelID", tid), new_port)
+            else:
+                _write_paid_config(tid, t["subdomain"], new_port, "")
             break
     save_tunnels(tunnels)
     return web.json_response({"ok": True})
@@ -335,8 +342,6 @@ async def api_start(request):
         return web.json_response({"error": "not found"}, status=404)
     if t.get("provision_status") == "pending":
         return web.json_response({"error": "Still provisioning, please wait."}, status=400)
-    if t.get("tier") == "free":
-        return web.json_response({"error": "Free tunnels cannot be restarted. Delete and create a new one."}, status=400)
     ok = _start_proc(t)
     return web.json_response({"ok": ok})
 
