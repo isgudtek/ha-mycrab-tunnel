@@ -15,6 +15,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:tunnel
 panel_title: mycrab Tunnel
+host_network: true
 homeassistant_api: false
 hassio_api: false
 hassio_role: default
