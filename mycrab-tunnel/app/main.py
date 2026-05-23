@@ -6,7 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from aiohttp import web, ClientSession
+import aiohttp
+from aiohttp import web, ClientSession, ClientTimeout
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/data/options.json")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data/tunnels"))
@@ -101,27 +102,37 @@ def _write_cf_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: 
 async def provision_free(name: str, local_port: int) -> dict:
     """Start cloudflared quick tunnel, get URL from metrics API."""
     tunnel_id = f"free-{int(time.time())}"
-    metrics_port = 20242 + (int(time.time()) % 1000)  # avoid collisions on restart
+    metrics_port = 20252  # fixed, away from cloudflared default 20242
 
     proc = await asyncio.create_subprocess_exec(
         "cloudflared", "tunnel",
         "--url", f"http://localhost:{local_port}",
         "--no-autoupdate",
-        "--metrics", f"127.0.0.1:{metrics_port}",
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        "--metrics", f"0.0.0.0:{metrics_port}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
 
-    # Poll /quicktunnel on metrics server until hostname appears (max 30s)
+    # Poll /quicktunnel on metrics server until hostname appears (max 45s)
     tunnel_url = None
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + 30
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 45
 
     async with ClientSession() as session:
         while loop.time() < deadline:
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
+            if proc.returncode is not None:
+                out = b""
+                try:
+                    out = await asyncio.wait_for(proc.stdout.read(500), timeout=2)
+                except Exception:
+                    pass
+                raise RuntimeError(f"Tunnel process exited: {out.decode()[-200:]}")
             try:
-                async with session.get(f"http://127.0.0.1:{metrics_port}/quicktunnel", timeout=2) as r:
+                async with session.get(
+                    f"http://127.0.0.1:{metrics_port}/quicktunnel",
+                    timeout=ClientTimeout(total=2),
+                ) as r:
                     if r.status == 200:
                         data = await r.json()
                         hostname = data.get("hostname", "")
@@ -129,11 +140,16 @@ async def provision_free(name: str, local_port: int) -> dict:
                             tunnel_url = f"https://{hostname}"
                             break
             except Exception:
-                pass  # metrics server not up yet
+                pass  # metrics server not up yet — keep waiting
 
     if not tunnel_url:
         proc.terminate()
-        raise RuntimeError("cloudflared did not produce a tunnel URL within 30s")
+        try:
+            out = await asyncio.wait_for(proc.stdout.read(500), timeout=2)
+            detail = out.decode()[-200:].strip()
+        except Exception:
+            detail = "no output"
+        raise RuntimeError(f"Could not establish tunnel. Try again in a moment. [{detail}]")
 
     _procs[tunnel_id] = proc
 
