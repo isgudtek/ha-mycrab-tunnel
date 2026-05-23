@@ -18,6 +18,17 @@ API_BASE = "https://api.mycrab.space"
 _procs: dict[str, subprocess.Popen] = {}
 
 
+def load_ha_config() -> dict:
+    try:
+        return json.loads(Path(CONFIG_PATH).read_text())
+    except Exception:
+        return {}
+
+
+def get_default_token() -> str:
+    return load_ha_config().get("token", "").strip()
+
+
 def load_tunnels() -> list:
     if TUNNELS_FILE.exists():
         return json.loads(TUNNELS_FILE.read_text())
@@ -203,6 +214,10 @@ async def api_status(request):
     })
 
 
+async def api_config(request):
+    return web.json_response({"default_token": get_default_token()})
+
+
 app = web.Application()
 app.router.add_get("/", index)
 app.router.add_get("/ui", ui)
@@ -212,6 +227,7 @@ app.router.add_post("/api/tunnels/{id}/start", api_start)
 app.router.add_post("/api/tunnels/{id}/stop", api_stop)
 app.router.add_delete("/api/tunnels/{id}", api_delete)
 app.router.add_get("/api/status", api_status)
+app.router.add_get("/api/config", api_config)
 app.router.add_static("/static", Path(__file__).parent / "static")
 
 if __name__ == "__main__":

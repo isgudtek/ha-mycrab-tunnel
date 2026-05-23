@@ -264,7 +264,18 @@ function renderTunnels(list) {
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function setPort(p){ document.getElementById('m-port').value=p; }
-function openCreate(){ document.getElementById('create-modal').classList.add('open'); document.getElementById('m-name').focus(); }
+async function openCreate(){
+  document.getElementById('create-modal').classList.add('open');
+  document.getElementById('m-name').focus();
+  // Pre-fill token from HA config if set and field is empty
+  const tok = document.getElementById('m-token');
+  if (!tok.value) {
+    try {
+      const cfg = await fetch('/api/config').then(r=>r.json());
+      if (cfg.default_token) tok.value = cfg.default_token;
+    } catch{}
+  }
+}
 function closeCreate(){ document.getElementById('create-modal').classList.remove('open'); resetModal(); }
 
 function resetModal(){
