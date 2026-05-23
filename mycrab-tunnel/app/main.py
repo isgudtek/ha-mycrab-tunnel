@@ -13,6 +13,25 @@ CONFIG_PATH = os.environ.get("CONFIG_PATH", "/data/options.json")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data/tunnels"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+def _host_addr() -> str:
+    """Return address that reaches the host from inside this container.
+    In bridge mode the default route gateway IS the host; in host-network
+    mode the gateway is 0.0.0.0 / absent, so localhost works."""
+    try:
+        for line in Path("/proc/net/route").read_text().splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 3 and parts[1] == "00000000":  # default route
+                gw_hex = parts[2]
+                if gw_hex == "00000000":
+                    return "127.0.0.1"  # host networking — no bridge gateway
+                gw = ".".join(str(int(gw_hex[i:i+2], 16)) for i in (6, 4, 2, 0))
+                return gw  # bridge gateway = host IP
+    except Exception:
+        pass
+    return "172.30.32.1"  # HA supervisor bridge fallback
+
+HOST_ADDR = _host_addr()
+
 TUNNELS_FILE = DATA_DIR / "tunnels.json"
 API_BASE = "https://api.mycrab.space"
 
@@ -85,7 +104,7 @@ def _write_paid_config(tunnel_id: str, subdomain: str, local_port: int, cf_token
         f"credentials-file: {creds_path}\n"
         f"ingress:\n"
         f"  - hostname: {subdomain}.mycrab.space\n"
-        f"    service: http://localhost:{local_port}\n"
+        f"    service: http://{HOST_ADDR}:{local_port}\n"
         f"  - service: http_status:404\n"
     )
     creds_path.write_text(json.dumps({
@@ -107,7 +126,7 @@ def _write_free_config(tunnel_id: str, tunnel_uuid: str, local_port: int, creds_
         f"credentials-file: {creds_path}\n"
         f"ingress:\n"
         f"  - hostname: {tunnel_id}.mycrab.space\n"
-        f"    service: http://localhost:{local_port}\n"
+        f"    service: http://{HOST_ADDR}:{local_port}\n"
         f"  - service: http_status:404\n"
     )
 
