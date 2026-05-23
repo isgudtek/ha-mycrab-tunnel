@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mycrab Tunnel</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #181c27;
+    --surface2: #1e2334;
+    --border: #2a3045;
+    --border-bright: #3d4a65;
+    --text: #e8ecf4;
+    --muted: #7a85a0;
+    --accent: #ff6b2b;
+    --accent-dim: rgba(255,107,43,0.12);
+    --accent-glow: rgba(255,107,43,0.25);
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.12);
+    --red: #ef4444;
+    --red-dim: rgba(239,68,68,0.1);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  .shell { display: grid; grid-template-rows: 64px 1fr; min-height: 100vh; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 28px; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+  .logo-icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), #ff9a5c); display: flex; align-items: center; justify-content: center; }
+  .logo-icon svg { width: 18px; height: 18px; }
+
+  .status-pill { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+  .status-pill.idle { background: var(--surface2); color: var(--muted); border-color: var(--border); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+
+  main { padding: 28px; max-width: 960px; margin: 0 auto; }
+
+  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 28px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .stat-val { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s ease; font-family: inherit; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #ff8347; transform: translateY(-1px); box-shadow: 0 4px 16px var(--accent-glow); }
+  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); border-color: var(--border-bright); }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,.2); }
+  .btn-danger:hover { background: rgba(239,68,68,.2); }
+  .btn-success { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
+  .btn-success:hover { background: rgba(34,197,94,.2); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; }
+
+  .tunnels { display: flex; flex-direction: column; gap: 10px; }
+  .tunnel-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color .15s; }
+  .tunnel-card:hover { border-color: var(--border-bright); }
+  .tunnel-card.running { border-left: 3px solid var(--green); }
+  .tunnel-card.stopped { border-left: 3px solid var(--border-bright); }
+  .tunnel-inner { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 16px 20px; gap: 16px; }
+  .tunnel-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .05em; }
+  .badge-green { background: var(--green-dim); color: var(--green); }
+  .badge-muted { background: var(--surface2); color: var(--muted); }
+  .tunnel-url { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); margin-bottom: 4px; cursor: pointer; }
+  .tunnel-url:hover { text-decoration: underline; }
+  .tunnel-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; }
+  .tunnel-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+  .empty { text-align: center; padding: 64px 24px; background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: .4; }
+  .empty h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  .empty p { color: var(--muted); max-width: 340px; margin: 0 auto 24px; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; backdrop-filter: blur(4px); }
+  .overlay.open { opacity: 1; pointer-events: all; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 480px; padding: 28px; transform: translateY(12px); transition: transform .2s; }
+  .overlay.open .modal { transform: translateY(0); }
+  .modal h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .form-group { margin-bottom: 18px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+  input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: inherit; font-size: 14px; transition: border-color .15s; outline: none; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  input::placeholder { color: var(--muted); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .hint a { color: var(--accent); text-decoration: none; }
+  .token-row { display: flex; gap: 8px; }
+  .token-row input { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .quick-ports { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .port-chip { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; transition: all .1s; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .port-chip:hover { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 24px; }
+  .modal-actions .btn { flex: 1; justify-content: center; }
+  .error-box { background: var(--red-dim); border: 1px solid rgba(239,68,68,.3); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--red); font-size: 13px; margin-top: 16px; display: none; }
+
+  .progress-steps { margin: 20px 0; }
+  .step-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--muted); transition: color .3s; }
+  .step-item.active { color: var(--text); }
+  .step-item.done { color: var(--green); }
+  .step-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; transition: all .3s; }
+  .step-item.active .step-dot { border-color: var(--accent); background: var(--accent-dim); }
+  .step-item.done .step-dot { border-color: var(--green); background: var(--green-dim); color: var(--green); }
+
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2); border-top-color: currentColor; border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); padding: 10px 20px; border-radius: 20px; font-size: 13px; transition: transform .25s ease; z-index: 300; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 600px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .tunnel-inner { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z"/></svg>
+      </div>
+      mycrab Tunnel
+    </div>
+    <div id="global-pill" class="status-pill idle"><span class="dot"></span><span id="status-text">Loading…</span></div>
+  </header>
+
+  <main>
+    <div class="stats">
+      <div class="stat"><div class="stat-val" id="stat-total" style="color:var(--accent)">—</div><div class="stat-label">Tunnels</div></div>
+      <div class="stat"><div class="stat-val" id="stat-running" style="color:var(--green)">—</div><div class="stat-label">Running</div></div>
+      <div class="stat"><div class="stat-val" id="stat-stopped" style="color:var(--muted)">—</div><div class="stat-label">Stopped</div></div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">Your tunnels</div>
+      <button class="btn btn-primary" onclick="openCreate()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New tunnel
+      </button>
+    </div>
+    <div class="tunnels" id="tunnels-list"></div>
+  </main>
+</div>
+
+<!-- Modal -->
+<div class="overlay" id="create-modal" onclick="if(event.target===this)closeCreate()">
+  <div class="modal">
+    <h2>New tunnel</h2>
+    <p class="sub">Expose any local port via a secure mycrab.space URL — free, no Cloudflare account needed.</p>
+
+    <div class="form-group">
+      <label>Service name</label>
+      <input id="m-name" type="text" placeholder="Home Assistant, Frigate, Node-RED…">
+    </div>
+
+    <div class="form-group">
+      <label>Local port</label>
+      <input id="m-port" type="number" value="8123" min="1" max="65535">
+      <div class="quick-ports">
+        <span class="port-chip" onclick="setPort(8123)">8123 HA</span>
+        <span class="port-chip" onclick="setPort(5005)">5005 Frigate</span>
+        <span class="port-chip" onclick="setPort(1880)">1880 Node-RED</span>
+        <span class="port-chip" onclick="setPort(8883)">8883 MQTT</span>
+        <span class="port-chip" onclick="setPort(3000)">3000 Grafana</span>
+        <span class="port-chip" onclick="setPort(9090)">9090 Prometheus</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Custom domain token <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <div class="token-row">
+        <input id="m-token" type="text" placeholder="Blank = free agent-XXXXXX.mycrab.space">
+        <a href="https://mycrab.space/domain-select.html" target="_blank" class="btn btn-ghost btn-sm" style="white-space:nowrap;text-decoration:none">Get one →</a>
+      </div>
+      <div class="hint">Free tier gives you a random subdomain. <a href="https://mycrab.space/domain-select.html" target="_blank">$14.99/yr</a> for a memorable name.</div>
+    </div>
+
+    <div class="progress-steps" id="progress" style="display:none">
+      <div class="step-item" id="step-1"><div class="step-dot">1</div> Reserving subdomain</div>
+      <div class="step-item" id="step-2"><div class="step-dot">2</div> Configuring tunnel</div>
+      <div class="step-item" id="step-3"><div class="step-dot">3</div> Starting cloudflared</div>
+      <div class="step-item" id="step-4"><div class="step-dot">✓</div> Ready</div>
+    </div>
+
+    <div class="error-box" id="modal-err"></div>
+
+    <div class="modal-actions" id="modal-btns">
+      <button class="btn btn-ghost" onclick="closeCreate()">Cancel</button>
+      <button class="btn btn-primary" id="btn-create" onclick="createTunnel()">Create tunnel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let tunnels = [];
+
+async function load() {
+  try {
+    const [tRes, sRes] = await Promise.all([fetch('/api/tunnels'), fetch('/api/status')]);
+    tunnels = await tRes.json();
+    const s = await sRes.json();
+    document.getElementById('stat-total').textContent = s.total;
+    document.getElementById('stat-running').textContent = s.running;
+    document.getElementById('stat-stopped').textContent = s.stopped;
+    const pill = document.getElementById('global-pill');
+    const txt = document.getElementById('status-text');
+    if (s.running > 0) { pill.className='status-pill'; txt.textContent=`${s.running} active`; }
+    else if (!s.total) { pill.className='status-pill idle'; txt.textContent='No tunnels'; }
+    else { pill.className='status-pill idle'; txt.textContent='All stopped'; }
+    renderTunnels(tunnels);
+  } catch(e) { console.error(e); }
+}
+
+function renderTunnels(list) {
+  const el = document.getElementById('tunnels-list');
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🌐</div><h3>No tunnels yet</h3><p>Create your first tunnel to expose Home Assistant or any local service to the internet — no port forwarding needed.</p><button class="btn btn-primary" onclick="openCreate()">Create your first tunnel</button></div>`;
+    return;
+  }
+  el.innerHTML = list.map(t => `
+    <div class="tunnel-card ${t.status}">
+      <div class="tunnel-inner">
+        <div>
+          <div class="tunnel-name">${esc(t.name)}<span class="badge ${t.status==='running'?'badge-green':'badge-muted'}">${t.status}</span></div>
+          <div class="tunnel-url" onclick="copyUrl('${esc(t.url)}')" title="Click to copy">${esc(t.url)}</div>
+          <div class="tunnel-meta"><span>localhost:${t.local_port}</span><span>${t.created_at ? new Date(t.created_at*1000).toLocaleDateString() : '—'}</span></div>
+        </div>
+        <div class="tunnel-actions">
+          ${t.status==='running'
+            ? `<button class="btn btn-sm btn-danger" onclick="stopTunnel('${t.id}')">Stop</button>`
+            : `<button class="btn btn-sm btn-success" onclick="startTunnel('${t.id}')">Start</button>`}
+          <button class="btn btn-sm btn-ghost" onclick="copyUrl('${esc(t.url)}')" title="Copy">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function setPort(p){ document.getElementById('m-port').value=p; }
+function openCreate(){ document.getElementById('create-modal').classList.add('open'); document.getElementById('m-name').focus(); }
+function closeCreate(){ document.getElementById('create-modal').classList.remove('open'); resetModal(); }
+
+function resetModal(){
+  document.getElementById('progress').style.display='none';
+  document.getElementById('modal-btns').style.display='flex';
+  document.getElementById('modal-err').style.display='none';
+  const btn=document.getElementById('btn-create');
+  btn.disabled=false; btn.innerHTML='Create tunnel';
+  for(let i=1;i<=4;i++) document.getElementById(`step-${i}`).className='step-item';
+}
+
+function setStep(n){
+  for(let i=1;i<=4;i++){
+    const el=document.getElementById(`step-${i}`);
+    el.className = i<n?'step-item done':i===n?'step-item active':'step-item';
+  }
+}
+
+async function createTunnel(){
+  const name=document.getElementById('m-name').value.trim()||'My tunnel';
+  const port=parseInt(document.getElementById('m-port').value)||8123;
+  const token=document.getElementById('m-token').value.trim();
+  const btn=document.getElementById('btn-create');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Creating…';
+  document.getElementById('progress').style.display='block';
+  document.getElementById('modal-btns').querySelector('.btn-ghost').style.display='none';
+  document.getElementById('modal-err').style.display='none';
+  setStep(1); await delay(400); setStep(2);
+  try {
+    const r=await fetch('/api/tunnels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,local_port:port,token:token||null})});
+    setStep(3);
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.error||'Failed to create tunnel');
+    await delay(600); setStep(4); await delay(400);
+    closeCreate(); await load(); toast(`Tunnel ready → ${data.url}`);
+  } catch(e) {
+    document.getElementById('modal-err').textContent=e.message;
+    document.getElementById('modal-err').style.display='block';
+    btn.disabled=false; btn.innerHTML='Try again';
+    document.getElementById('modal-btns').querySelector('.btn-ghost').style.display='';
+  }
+}
+
+async function startTunnel(id){ await fetch(`/api/tunnels/${id}/start`,{method:'POST'}); await load(); }
+async function stopTunnel(id){ await fetch(`/api/tunnels/${id}/stop`,{method:'POST'}); await load(); }
+async function deleteTunnel(id,name){
+  if(!confirm(`Delete tunnel "${name}"?\nThis stops it and removes the configuration.`)) return;
+  await fetch(`/api/tunnels/${id}`,{method:'DELETE'}); await load();
+}
+function copyUrl(url){ navigator.clipboard.writeText(url).then(()=>toast('URL copied!')).catch(()=>{}); }
+function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }
+function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+load();
+setInterval(load, 8000);
+document.addEventListener('keydown',e=>{ if(e.key==='Escape')closeCreate(); if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openCreate();} });
+</script>
+</body>
+</html>
