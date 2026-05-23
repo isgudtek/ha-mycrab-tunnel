@@ -93,9 +93,15 @@ def _write_paid_config(tunnel_id: str, subdomain: str, local_port: int, cf_token
     }))
 
 
-def _write_free_config(tunnel_id: str, tunnel_uuid: str, local_port: int):
+def _write_free_config(tunnel_id: str, tunnel_uuid: str, local_port: int, creds_path: Path = None):
     cfg = _cf_config_path(tunnel_id)
-    creds_path = DATA_DIR / f"{tunnel_id}-creds.json"
+    if creds_path is None:
+        # Try to find the actual creds file (cloudflared writes to same dir as origincert)
+        creds_path = next(
+            (p for p in [DATA_DIR / f"{tunnel_uuid}.json",
+                         DATA_DIR / f"{tunnel_id}-creds.json"] if p.exists()),
+            DATA_DIR / f"{tunnel_uuid}.json"
+        )
     cfg.write_text(
         f"tunnel: {tunnel_uuid}\n"
         f"credentials-file: {creds_path}\n"
@@ -184,11 +190,16 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
 
         uuid = m.group(0)
 
-        # Move credentials from cloudflared default location to persistent storage
-        creds_src = Path(f"/root/.cloudflared/{uuid}.json")
-        creds_dst = DATA_DIR / f"{tunnel_id}-creds.json"
-        if creds_src.exists():
-            creds_dst.write_bytes(creds_src.read_bytes())
+        # cloudflared writes creds to same dir as origincert or ~/.cloudflared/
+        creds_actual = next(
+            (p for p in [
+                DATA_DIR / f"{uuid}.json",
+                Path(f"/root/.cloudflared/{uuid}.json"),
+            ] if p.exists()),
+            None
+        )
+        if creds_actual is None:
+            raise RuntimeError(f"Credentials file not found after tunnel create (uuid={uuid})")
 
         # Step 4: send tunnel_id so operator sets up DNS record
         async with ClientSession() as s:
@@ -201,7 +212,7 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
         await _poll_mycrab_field(tunnel_id, "config_yml", timeout=600)
 
         # Step 6: write our own config with correct container paths
-        _write_free_config(tunnel_id, uuid, local_port)
+        _write_free_config(tunnel_id, uuid, local_port, creds_actual)
 
         # Step 7: update record, start tunnel
         _update(provision_status="live", url=f"https://{tunnel_id}.mycrab.space",

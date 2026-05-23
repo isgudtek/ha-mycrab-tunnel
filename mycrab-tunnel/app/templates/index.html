@@ -107,7 +107,9 @@
   .badge-muted { background: var(--surface2); color: var(--muted); }
   .tunnel-url { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); margin-bottom: 4px; cursor: pointer; }
   .tunnel-url:hover { text-decoration: underline; }
-  .tunnel-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; }
+  .tunnel-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .port-edit-wrap { display: inline-flex; align-items: center; gap: 4px; }
+  .port-editor { display: inline-flex; align-items: center; gap: 4px; }
   .tunnel-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
   .empty { text-align: center; padding: 64px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -341,6 +343,19 @@ function renderTunnels(list) {
     const isPending = t.status === 'pending';
     const isFailed = t.status === 'failed';
     const isRunning = t.status === 'running';
+    const isStopped = t.status === 'stopped';
+
+    const portDisplay = isStopped
+      ? `<span class="port-edit-wrap">→ localhost:<span class="port-val" id="port-val-${t.id}">${t.local_port}</span>
+          <span class="port-editor" id="port-editor-${t.id}" style="display:none">
+            <input type="number" id="port-input-${t.id}" value="${t.local_port}" min="1" max="65535" style="width:70px;padding:2px 6px;font-size:11px;background:var(--bg);border:1px solid var(--accent);border-radius:4px;color:var(--text)">
+            <button class="btn btn-sm btn-primary" style="padding:2px 8px;font-size:11px" onclick="savePort('${t.id}')">Save</button>
+            <button class="btn btn-sm btn-ghost" style="padding:2px 8px;font-size:11px" onclick="cancelPort('${t.id}',${t.local_port})">✕</button>
+          </span>
+          <svg id="port-pencil-${t.id}" onclick="editPort('${t.id}')" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="cursor:pointer;margin-left:4px;opacity:.5;flex-shrink:0"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </span>`
+      : `→ localhost:${t.local_port}`;
+
     const actions = isPending ? `
       <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
@@ -357,23 +372,50 @@ function renderTunnels(list) {
       <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
       </button>`;
+
     const statusLine = isPending
-      ? `<div class="pending-info"><span class="spin-sm"></span> Provisioning tunnel with mycrab… this takes a minute</div>`
+      ? `<div class="pending-info"><span class="spin-sm"></span> Provisioning tunnel with mycrab…</div>`
       : isFailed
-      ? `<div class="pending-info" style="color:var(--red)">Provisioning failed: ${esc(t.error||'unknown error')}</div>`
+      ? `<div class="pending-info" style="color:var(--red)">Failed: ${esc(t.error||'unknown error')}</div>`
       : `<div class="tunnel-url" onclick="copyUrl('${esc(t.url)}')" title="Click to copy">${esc(t.url)}</div>`;
+
     return `
     <div class="tunnel-card ${t.status}">
       <div class="tunnel-inner">
         <div>
           <div class="tunnel-name">${esc(t.name)}<span class="badge ${badgeClass(t.status)}">${t.status}</span></div>
           ${statusLine}
-          <div class="tunnel-meta"><span>→ localhost:${t.local_port}</span><span>${t.tier==='free'?'free mycrab':'paid mycrab'}</span></div>
+          <div class="tunnel-meta">${portDisplay}<span>${t.tier==='free'?'free mycrab':'paid mycrab'}</span></div>
         </div>
         <div class="tunnel-actions">${actions}</div>
       </div>
     </div>`;
   }).join('');
+}
+
+function editPort(id) {
+  document.getElementById('port-val-' + id).style.display = 'none';
+  document.getElementById('port-pencil-' + id).style.display = 'none';
+  document.getElementById('port-editor-' + id).style.display = 'inline-flex';
+  document.getElementById('port-input-' + id).focus();
+}
+function cancelPort(id, orig) {
+  document.getElementById('port-val-' + id).style.display = '';
+  document.getElementById('port-pencil-' + id).style.display = '';
+  document.getElementById('port-editor-' + id).style.display = 'none';
+  document.getElementById('port-input-' + id).value = orig;
+}
+async function savePort(id) {
+  const port = parseInt(document.getElementById('port-input-' + id).value);
+  if (!port || port < 1 || port > 65535) { toast('Invalid port'); return; }
+  const r = await fetch(api(`/api/tunnels/${id}/port`), {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({local_port: port})
+  });
+  const d = await r.json();
+  if (!r.ok) { toast(d.error || 'Failed'); return; }
+  toast(`Port updated → ${port}`);
+  await load();
 }
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -439,8 +481,17 @@ async function createTunnel(){
   }
 }
 
-async function startTunnel(id){ await fetch(api(`/api/tunnels/${id}/start`),{method:'POST'}); await load(); }
-async function stopTunnel(id){ await fetch(api(`/api/tunnels/${id}/stop`),{method:'POST'}); await load(); }
+async function startTunnel(id){
+  const r = await fetch(api(`/api/tunnels/${id}/start`),{method:'POST'});
+  const d = await r.json();
+  if (!r.ok) { toast(d.error||'Start failed'); return; }
+  if (!d.ok) { toast('Config missing — tunnel cannot start'); return; }
+  await load();
+}
+async function stopTunnel(id){
+  await fetch(api(`/api/tunnels/${id}/stop`),{method:'POST'});
+  await load();
+}
 async function deleteTunnel(id,name){
   if(!confirm(`Delete tunnel "${name}"?\nThis stops it and removes the configuration.`)) return;
   await fetch(api(`/api/tunnels/${id}`),{method:'DELETE'}); await load();
