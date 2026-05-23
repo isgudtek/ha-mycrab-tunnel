@@ -1,8 +1,8 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -99,63 +99,48 @@ def _write_cf_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: 
 # ── Provisioning ─────────────────────────────────────────────────────
 
 async def provision_free(name: str, local_port: int) -> dict:
-    """Run agent-setup-auto.sh in bot mode and parse out subdomain + CF token."""
+    """Start cloudflared quick tunnel, parse the assigned trycloudflare.com URL."""
     tunnel_id = f"free-{int(time.time())}"
-    env = os.environ.copy()
-    env["MODE"] = "bot"
-    env["HOME"] = str(DATA_DIR)
 
-    # Download and run setup script
-    script_url = "https://mycrab.space/agent-setup-auto.sh"
     proc = await asyncio.create_subprocess_exec(
-        "bash", "-c", f"curl -fsSL {script_url} | MODE=bot bash",
-        env=env,
+        "cloudflared", "tunnel", "--url", f"http://localhost:{local_port}",
+        "--no-autoupdate",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-    output = stdout.decode() + stderr.decode()
 
-    # Parse subdomain from output
-    subdomain = None
-    cf_token = None
-    for line in output.splitlines():
-        if "agent-" in line and ".mycrab.space" in line:
-            import re
-            m = re.search(r'(agent-\w+)', line)
-            if m:
-                subdomain = m.group(1)
-        if "tunnel_token" in line.lower() or "TUNNEL_TOKEN" in line:
-            import re
-            m = re.search(r'[A-Za-z0-9+/=]{40,}', line)
-            if m:
-                cf_token = m.group(0)
+    # cloudflared prints the URL to stderr — read until we find it (30s timeout)
+    tunnel_url = None
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + 30
 
-    if not subdomain:
-        # Try reading the generated yml from ~/.cloudflared
-        cf_dir = DATA_DIR / ".cloudflared"
-        ymls = list(cf_dir.glob("agent-*.yml")) if cf_dir.exists() else []
-        if ymls:
-            newest = max(ymls, key=lambda p: p.stat().st_mtime)
-            subdomain = newest.stem
+    while loop.time() < deadline:
+        remaining = deadline - loop.time()
+        try:
+            line_bytes = await asyncio.wait_for(proc.stderr.readline(), timeout=min(remaining, 3))
+        except asyncio.TimeoutError:
+            break
+        if not line_bytes:
+            break
+        line = line_bytes.decode(errors="replace")
+        m = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', line)
+        if m:
+            tunnel_url = m.group(0)
+            break
 
-    if not subdomain:
-        raise RuntimeError(f"Could not parse subdomain from setup script output.\n{output[-500:]}")
+    if not tunnel_url:
+        proc.terminate()
+        raise RuntimeError("cloudflared did not return a tunnel URL within 30s — is it installed?")
 
-    # Copy generated cloudflared config if present
-    src_yml = DATA_DIR / ".cloudflared" / f"{subdomain}.yml"
-    if src_yml.exists():
-        _cf_config_path(tunnel_id).write_text(src_yml.read_text())
-    elif cf_token:
-        _write_cf_config(tunnel_id, subdomain, local_port, cf_token)
-    else:
-        raise RuntimeError("No cloudflared config generated. Setup script may have failed.")
+    # Keep process alive (already stored before it exits)
+    _procs[tunnel_id] = proc
 
+    subdomain = re.sub(r'https://|\.trycloudflare\.com', '', tunnel_url)
     return {
         "id": tunnel_id,
         "name": name or "Home Assistant",
         "subdomain": subdomain,
-        "url": f"https://{subdomain}.mycrab.space",
+        "url": tunnel_url,
         "local_port": local_port,
         "tier": "free",
         "expires_at": int(time.time()) + FREE_TTL,
@@ -246,7 +231,9 @@ async def api_create(request):
     tunnels.append(tunnel)
     save_tunnels(tunnels)
 
-    if tunnel.get("tier") == "free":
+    # Free tunnels: cloudflared process already started inside provision_free()
+    # Paid tunnels: start cloudflared with config file
+    if tunnel.get("tier") == "paid":
         _start_proc(tunnel)
 
     return web.json_response(tunnel)
@@ -275,6 +262,8 @@ async def api_start(request):
         return web.json_response({"error": "not found"}, status=404)
     if _is_expired(t):
         return web.json_response({"error": "Tunnel expired. Create a new one."}, status=400)
+    if t.get("tier") == "free":
+        return web.json_response({"error": "Free tunnels cannot be restarted — they get a new URL each time. Delete and create a new one."}, status=400)
     ok = _start_proc(t)
     return web.json_response({"ok": ok})
 
