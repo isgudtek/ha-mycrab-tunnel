@@ -93,6 +93,13 @@
   .tunnel-card:hover { border-color: var(--border-bright); }
   .tunnel-card.running { border-left: 3px solid var(--green); }
   .tunnel-card.stopped { border-left: 3px solid var(--border-bright); }
+  .tunnel-card.pending { border-left: 3px solid var(--accent); background: var(--surface); }
+  .tunnel-card.failed { border-left: 3px solid var(--red); }
+  .badge-pending { background: var(--accent-dim); color: var(--accent); animation: pulse 2s infinite; }
+  .badge-failed { background: var(--red-dim); color: var(--red); }
+  .pending-info { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .spin-sm { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--accent-dim); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .tunnel-inner { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 16px 20px; gap: 16px; }
   .tunnel-name { font-weight: 500; font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
   .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .05em; }
@@ -322,36 +329,51 @@ function createHaTunnel() {
   openCreate();
 }
 
+function badgeClass(s){ return s==='running'?'badge-green':s==='pending'?'badge-pending':s==='failed'?'badge-failed':'badge-muted'; }
+
 function renderTunnels(list) {
   const el = document.getElementById('tunnels-list');
   if (!list.length) {
-    el.innerHTML = `<div class="empty"><h3>No tunnels yet</h3><p>Create your first tunnel to expose Home Assistant or any local service securely — no port forwarding needed.</p><button class="btn btn-primary" onclick="openCreate()">Create your first tunnel</button></div>`;
+    el.innerHTML = `<div class="empty"><h3>No tunnels yet</h3><p>Create your first free mycrab tunnel — get a permanent <strong>agent-XXXXXX.mycrab.space</strong> URL with no port forwarding needed.</p><button class="btn btn-primary" onclick="openCreate()">Create your first tunnel</button></div>`;
     return;
   }
-  el.innerHTML = list.map(t => `
+  el.innerHTML = list.map(t => {
+    const isPending = t.status === 'pending';
+    const isFailed = t.status === 'failed';
+    const isRunning = t.status === 'running';
+    const actions = isPending ? `
+      <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>` : `
+      <a href="${esc(t.url)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none" title="Open">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </a>
+      ${isRunning
+        ? `<button class="btn btn-sm btn-danger" onclick="stopTunnel('${t.id}')">Stop</button>`
+        : `<button class="btn btn-sm btn-success" onclick="startTunnel('${t.id}')">Start</button>`}
+      <button class="btn btn-sm btn-ghost" onclick="copyUrl('${esc(t.url)}')" title="Copy">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+      <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>`;
+    const statusLine = isPending
+      ? `<div class="pending-info"><span class="spin-sm"></span> Provisioning tunnel with mycrab… this takes a minute</div>`
+      : isFailed
+      ? `<div class="pending-info" style="color:var(--red)">Provisioning failed: ${esc(t.error||'unknown error')}</div>`
+      : `<div class="tunnel-url" onclick="copyUrl('${esc(t.url)}')" title="Click to copy">${esc(t.url)}</div>`;
+    return `
     <div class="tunnel-card ${t.status}">
       <div class="tunnel-inner">
         <div>
-          <div class="tunnel-name">${esc(t.name)}<span class="badge ${t.status==='running'?'badge-green':'badge-muted'}">${t.status}</span></div>
-          <div class="tunnel-url" onclick="copyUrl('${esc(t.url)}')" title="Click to copy">${esc(t.url)}</div>
-          <div class="tunnel-meta"><span>→ localhost:${t.local_port}</span><span>${t.tier === 'free' ? 'free' : 'paid'}</span>${t.expires_in != null ? `<span>expires in ${Math.round(t.expires_in/60)}m</span>` : ''}</div>
+          <div class="tunnel-name">${esc(t.name)}<span class="badge ${badgeClass(t.status)}">${t.status}</span></div>
+          ${statusLine}
+          <div class="tunnel-meta"><span>→ localhost:${t.local_port}</span><span>${t.tier==='free'?'free mycrab':'paid mycrab'}</span></div>
         </div>
-        <div class="tunnel-actions">
-          <a href="${esc(t.url)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none" title="Open">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </a>
-          ${t.status==='running'
-            ? `<button class="btn btn-sm btn-danger" onclick="stopTunnel('${t.id}')">Stop</button>`
-            : `<button class="btn btn-sm btn-success" onclick="startTunnel('${t.id}')">Start</button>`}
-          <button class="btn btn-sm btn-ghost" onclick="copyUrl('${esc(t.url)}')" title="Copy">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          </button>
-        </div>
+        <div class="tunnel-actions">${actions}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -395,17 +417,20 @@ async function createTunnel(){
   document.getElementById('progress').style.display='block';
   document.getElementById('modal-btns').querySelector('.btn-ghost').style.display='none';
   document.getElementById('modal-err').style.display='none';
-  setStep(1); await delay(400); setStep(2);
+  setStep(1); await delay(300); setStep(2);
   try {
     const r=await fetch(api('/api/tunnels'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,local_port:port,token:token||null})});
     setStep(3);
     const data=await r.json();
     if(!r.ok) throw new Error(data.error||'Failed to create tunnel');
-    await delay(600); setStep(4); await delay(400);
+    await delay(400); setStep(4); await delay(300);
     closeCreate(); await load();
-    toast(`Tunnel ready → ${data.url}`);
-    // If it's an HA tunnel, switch to HA panel
-    if (port === 8123) showPanel('ha', document.querySelectorAll('.nav-tab')[1]);
+    if (data.provision_status === 'pending') {
+      toast(`Tunnel requested — provisioning ${data.url}`);
+    } else {
+      toast(`Tunnel ready → ${data.url}`);
+      if (port === 8123) showPanel('ha', document.querySelectorAll('.nav-tab')[1]);
+    }
   } catch(e) {
     document.getElementById('modal-err').textContent=e.message;
     document.getElementById('modal-err').style.display='block';
