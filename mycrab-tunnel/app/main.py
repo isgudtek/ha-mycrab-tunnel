@@ -274,7 +274,7 @@ async def provision_free(name: str, local_port: int) -> dict:
 
 
 async def provision_paid(token: str, name: str, local_port: int) -> dict:
-    """Verify token via mycrab API, get subdomain, configure cloudflared."""
+    """Verify token, get subdomain, run same provisioning flow as free tunnels."""
     async with ClientSession() as session:
         async with session.post(f"{API_BASE}/verify-token",
                                 json={"token": token},
@@ -285,16 +285,12 @@ async def provision_paid(token: str, name: str, local_port: int) -> dict:
         raise ValueError(f"Invalid token: {data.get('error','unknown error')}")
 
     subdomain = data.get("subdomain", "").strip()
-    cf_token = data.get("tunnel_token") or data.get("cf_token") or token
-
     if not subdomain:
         raise ValueError("Token valid but no subdomain returned")
 
-    tunnel_id = f"paid-{subdomain}"
-    _write_paid_config(tunnel_id, subdomain, local_port, cf_token)
-
-    return {
-        "id": tunnel_id,
+    # Use subdomain directly as tunnel_id — same provisioning flow as free
+    tunnel = {
+        "id": subdomain,
         "name": name or subdomain,
         "subdomain": subdomain,
         "url": f"https://{subdomain}.mycrab.space",
@@ -302,7 +298,9 @@ async def provision_paid(token: str, name: str, local_port: int) -> dict:
         "tier": "paid",
         "expires_at": None,
         "created_at": int(time.time()),
+        "provision_status": "pending",
     }
+    return tunnel
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -332,7 +330,7 @@ async def api_create(request):
             tunnels = [t for t in tunnels if t["id"] != tunnel["id"]]
             tunnels.append(tunnel)
             save_tunnels(tunnels)
-            _start_proc(tunnel)
+            asyncio.create_task(_provision_mycrab_task(tunnel["id"], local_port))
         else:
             tunnel = await provision_free(name, local_port)
             # already saved + background task started inside provision_free
@@ -414,9 +412,9 @@ async def api_config(request):
 # ── App ──────────────────────────────────────────────────────────────
 
 async def on_startup(app):
-    # Auto-start paid tunnels that were running before restart
+    # Auto-start live tunnels that were running before restart
     for t in load_tunnels():
-        if t.get("tier") == "paid" and not t.get("provision_status"):
+        if t.get("provision_status") == "live":
             _start_proc(t)
 
 
