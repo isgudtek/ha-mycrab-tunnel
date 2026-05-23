@@ -333,11 +333,14 @@ async def api_update_port(request):
             t["local_port"] = new_port
             _stop_proc(tid)
             if t.get("tier") == "free":
-                # Re-read uuid from existing creds, rewrite config
-                creds_path = DATA_DIR / f"{tid}-creds.json"
-                if creds_path.exists():
-                    creds = json.loads(creds_path.read_text())
-                    _write_free_config(tid, creds.get("TunnelID", tid), new_port)
+                # Read UUID from existing config file
+                cfg = _cf_config_path(tid)
+                uuid = tid
+                if cfg.exists():
+                    m = re.search(r'^tunnel:\s*(\S+)', cfg.read_text(), re.MULTILINE)
+                    if m:
+                        uuid = m.group(1)
+                _write_free_config(tid, uuid, new_port)
             else:
                 _write_paid_config(tid, t["subdomain"], new_port, "")
             break
