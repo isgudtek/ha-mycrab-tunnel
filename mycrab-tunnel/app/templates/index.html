@@ -264,9 +264,13 @@
 let tunnels = [];
 let haUrl = null;
 
+// Under HA ingress the base path changes — use location-relative URLs
+const BASE = window.location.pathname.replace(/\/[^/]*$/, '');
+function api(path) { return BASE + path; }
+
 async function load() {
   try {
-    const [tRes, sRes] = await Promise.all([fetch('/api/tunnels'), fetch('/api/status')]);
+    const [tRes, sRes] = await Promise.all([fetch(api('/api/tunnels')), fetch(api('/api/status'))]);
     tunnels = await tRes.json();
     const s = await sRes.json();
     document.getElementById('stat-total').textContent = s.total;
@@ -359,7 +363,7 @@ async function openCreate(){
   const tok = document.getElementById('m-token');
   if (!tok.value) {
     try {
-      const cfg = await fetch('/api/config').then(r=>r.json());
+      const cfg = await fetch(api('/api/config')).then(r=>r.json());
       if (cfg.default_token) tok.value = cfg.default_token;
     } catch{}
   }
@@ -393,7 +397,7 @@ async function createTunnel(){
   document.getElementById('modal-err').style.display='none';
   setStep(1); await delay(400); setStep(2);
   try {
-    const r=await fetch('/api/tunnels',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,local_port:port,token:token||null})});
+    const r=await fetch(api('/api/tunnels'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,local_port:port,token:token||null})});
     setStep(3);
     const data=await r.json();
     if(!r.ok) throw new Error(data.error||'Failed to create tunnel');
@@ -410,11 +414,11 @@ async function createTunnel(){
   }
 }
 
-async function startTunnel(id){ await fetch(`/api/tunnels/${id}/start`,{method:'POST'}); await load(); }
-async function stopTunnel(id){ await fetch(`/api/tunnels/${id}/stop`,{method:'POST'}); await load(); }
+async function startTunnel(id){ await fetch(api(`/api/tunnels/${id}/start`),{method:'POST'}); await load(); }
+async function stopTunnel(id){ await fetch(api(`/api/tunnels/${id}/stop`),{method:'POST'}); await load(); }
 async function deleteTunnel(id,name){
   if(!confirm(`Delete tunnel "${name}"?\nThis stops it and removes the configuration.`)) return;
-  await fetch(`/api/tunnels/${id}`,{method:'DELETE'}); await load();
+  await fetch(api(`/api/tunnels/${id}`),{method:'DELETE'}); await load();
 }
 function copyUrl(url){ navigator.clipboard.writeText(url).then(()=>toast('URL copied!')).catch(()=>{}); }
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }

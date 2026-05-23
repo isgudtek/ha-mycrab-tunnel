@@ -335,7 +335,7 @@ async def on_startup(app):
 app = web.Application()
 app.on_startup.append(on_startup)
 
-app.router.add_get("/", lambda r: web.HTTPFound("/ui"))
+app.router.add_get("/", ui)
 app.router.add_get("/ui", ui)
 app.router.add_get("/api/tunnels", api_tunnels)
 app.router.add_post("/api/tunnels", api_create)
