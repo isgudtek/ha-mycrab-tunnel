@@ -104,30 +104,30 @@ async def provision_free(name: str, local_port: int) -> dict:
     tunnel_id = f"free-{int(time.time())}"
     metrics_port = 20252  # fixed, away from cloudflared default 20242
 
+    log_path = f"/tmp/cf-{tunnel_id}.log"
+    log_file = open(log_path, "wb")
+
     proc = await asyncio.create_subprocess_exec(
         "cloudflared", "tunnel",
         "--url", f"http://localhost:{local_port}",
         "--no-autoupdate",
         "--metrics", f"0.0.0.0:{metrics_port}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
+        stdout=log_file,
+        stderr=log_file,
     )
 
-    # Poll /quicktunnel on metrics server until hostname appears (max 45s)
+    # Poll /quicktunnel on metrics server until hostname appears (max 60s)
     tunnel_url = None
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 45
+    deadline = loop.time() + 60
 
     async with ClientSession() as session:
         while loop.time() < deadline:
             await asyncio.sleep(2)
             if proc.returncode is not None:
-                out = b""
-                try:
-                    out = await asyncio.wait_for(proc.stdout.read(500), timeout=2)
-                except Exception:
-                    pass
-                raise RuntimeError(f"Tunnel process exited: {out.decode()[-200:]}")
+                log_file.close()
+                detail = Path(log_path).read_text()[-200:].strip()
+                raise RuntimeError(f"Tunnel process exited: {detail}")
             try:
                 async with session.get(
                     f"http://127.0.0.1:{metrics_port}/quicktunnel",
@@ -142,13 +142,10 @@ async def provision_free(name: str, local_port: int) -> dict:
             except Exception:
                 pass  # metrics server not up yet — keep waiting
 
+    log_file.close()
     if not tunnel_url:
         proc.terminate()
-        try:
-            out = await asyncio.wait_for(proc.stdout.read(500), timeout=2)
-            detail = out.decode()[-200:].strip()
-        except Exception:
-            detail = "no output"
+        detail = Path(log_path).read_text()[-200:].strip() if Path(log_path).exists() else "no output"
         raise RuntimeError(f"Could not establish tunnel. Try again in a moment. [{detail}]")
 
     _procs[tunnel_id] = proc
