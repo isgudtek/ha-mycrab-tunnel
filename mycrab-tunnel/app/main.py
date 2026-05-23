@@ -6,8 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-import aiohttp
-from aiohttp import web, ClientSession, ClientTimeout
+from aiohttp import web, ClientSession
 
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/data/options.json")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data/tunnels"))
@@ -100,10 +99,8 @@ def _write_cf_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: 
 # ── Provisioning ─────────────────────────────────────────────────────
 
 async def provision_free(name: str, local_port: int) -> dict:
-    """Start cloudflared quick tunnel, get URL from metrics API."""
+    """Start cloudflared quick tunnel, parse URL from log output."""
     tunnel_id = f"free-{int(time.time())}"
-    metrics_port = 20252  # fixed, away from cloudflared default 20242
-
     log_path = f"/tmp/cf-{tunnel_id}.log"
     log_file = open(log_path, "wb")
 
@@ -111,41 +108,34 @@ async def provision_free(name: str, local_port: int) -> dict:
         "cloudflared", "tunnel",
         "--url", f"http://localhost:{local_port}",
         "--no-autoupdate",
-        "--metrics", f"0.0.0.0:{metrics_port}",
         stdout=log_file,
         stderr=log_file,
     )
 
-    # Poll /quicktunnel on metrics server until hostname appears (max 60s)
+    # Poll log file for the trycloudflare.com URL (printed within ~5s usually)
     tunnel_url = None
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 60
 
-    async with ClientSession() as session:
-        while loop.time() < deadline:
-            await asyncio.sleep(2)
-            if proc.returncode is not None:
-                log_file.close()
-                detail = Path(log_path).read_text()[-200:].strip()
-                raise RuntimeError(f"Tunnel process exited: {detail}")
-            try:
-                async with session.get(
-                    f"http://127.0.0.1:{metrics_port}/quicktunnel",
-                    timeout=ClientTimeout(total=2),
-                ) as r:
-                    if r.status == 200:
-                        data = await r.json()
-                        hostname = data.get("hostname", "")
-                        if hostname:
-                            tunnel_url = f"https://{hostname}"
-                            break
-            except Exception:
-                pass  # metrics server not up yet — keep waiting
+    while loop.time() < deadline:
+        await asyncio.sleep(2)
+        if proc.returncode is not None:
+            log_file.close()
+            detail = Path(log_path).read_text()[-300:].strip()
+            raise RuntimeError(f"Tunnel process exited: {detail}")
+        try:
+            log_text = Path(log_path).read_text(errors="replace")
+            m = re.search(r'https://[a-z0-9-]+\.trycloudflare\.com', log_text)
+            if m:
+                tunnel_url = m.group(0)
+                break
+        except Exception:
+            pass
 
     log_file.close()
     if not tunnel_url:
         proc.terminate()
-        detail = Path(log_path).read_text()[-200:].strip() if Path(log_path).exists() else "no output"
+        detail = Path(log_path).read_text(errors="replace")[-300:].strip() if Path(log_path).exists() else "no output"
         raise RuntimeError(f"Could not establish tunnel. Try again in a moment. [{detail}]")
 
     _procs[tunnel_id] = proc
