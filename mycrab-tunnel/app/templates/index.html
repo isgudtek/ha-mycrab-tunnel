@@ -330,7 +330,14 @@ function renderTunnel(t) {
 }
 
 async function loadTunnels() {
-  const data = await api('GET', '/api/tunnels');
+  let data;
+  try {
+    data = await api('GET', '/api/tunnels');
+  } catch(e) {
+    document.getElementById('list').innerHTML = `<div class="empty"><h3>Connection error</h3><p style="color:var(--red);font-family:monospace;font-size:12px">${e.message}<br>BASE: ${BASE}<br>URL: ${location.href}</p></div>`;
+    _pollTimer = setTimeout(loadTunnels, 5000);
+    return;
+  }
   _tunnels = Array.isArray(data) ? data : [];
 
   const list = document.getElementById('list');
