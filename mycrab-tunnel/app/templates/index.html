@@ -227,7 +227,7 @@ let _tunnels = [];
 let _pollTimer = null;
 let _logsId = null;
 
-const BASE = (window._BASE !== undefined ? window._BASE : '') + '/';
+const BASE = (window._BASE || '') + '/';
 
 async function api(method, path, body) {
   const url = BASE + path.replace(/^\//, '');
@@ -329,17 +329,7 @@ function renderTunnel(t) {
   </div>`;
 }
 
-async function loadTunnels() {
-  let data;
-  try {
-    data = await api('GET', '/api/tunnels');
-  } catch(e) {
-    document.getElementById('list').innerHTML = `<div class="empty"><h3>Connection error</h3><p style="color:var(--red);font-family:monospace;font-size:12px">${e.message}<br>BASE: ${BASE}<br>URL: ${location.href}</p></div>`;
-    _pollTimer = setTimeout(loadTunnels, 5000);
-    return;
-  }
-  _tunnels = Array.isArray(data) ? data : [];
-
+function renderTunnels() {
   const list = document.getElementById('list');
   if (!_tunnels.length) {
     list.innerHTML = `<div class="empty">
@@ -350,28 +340,29 @@ async function loadTunnels() {
   } else {
     list.innerHTML = _tunnels.map(renderTunnel).join('');
   }
-
-  // Header pill
   const running = _tunnels.filter(t => t.status === 'running').length;
   const pending = _tunnels.filter(t => t.status === 'pending').length;
   const pill = document.getElementById('hdr-pill');
   const txt = document.getElementById('hdr-text');
-  if (running > 0) {
-    pill.className = 'pill running';
-    txt.textContent = `${running} running`;
-    document.getElementById('hdr-pill').querySelector('.dot').classList.add('pulse');
-  } else {
-    pill.className = 'pill idle';
-    txt.textContent = 'No active tunnels';
-  }
-
-  // Stats
+  pill.className = running > 0 ? 'pill running' : 'pill idle';
+  txt.textContent = running > 0 ? `${running} running` : 'No active tunnels';
+  if (running > 0) pill.querySelector('.dot').classList.add('pulse');
   document.getElementById('s-total').textContent = _tunnels.length;
   document.getElementById('s-running').textContent = running;
   document.getElementById('s-stopped').textContent = _tunnels.filter(t => t.status === 'stopped').length;
+  return pending;
+}
 
-  // Poll faster when pending tunnels exist
+async function loadTunnels() {
   clearTimeout(_pollTimer);
+  try {
+    const data = await api('GET', 'api/tunnels');
+    _tunnels = Array.isArray(data) ? data : [];
+  } catch(e) {
+    _pollTimer = setTimeout(loadTunnels, 5000);
+    return;
+  }
+  const pending = renderTunnels();
   _pollTimer = setTimeout(loadTunnels, pending > 0 ? 3000 : 8000);
 }
 
@@ -465,6 +456,12 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openCreate(); }
 });
 
+// Render from server-injected data immediately (no fetch on first load)
+if (window._INIT) {
+  _tunnels = window._INIT;
+  renderTunnels();
+}
+// Then start live polling
 loadTunnels();
 </script>
 </body>

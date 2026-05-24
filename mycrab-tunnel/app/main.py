@@ -297,11 +297,17 @@ async def _health_monitor():
 
 async def ui(request):
     ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    tunnels = load_tunnels()
+    for t in tunnels:
+        t["status"] = tunnel_status(t)
     html = (Path(__file__).parent / "templates" / "index.html").read_text()
-    html = html.replace(
-        "</head>",
-        f'<script>window._BASE="{ingress_path}/";</script></head>'
+    inject = (
+        f'<script>'
+        f'window._BASE="{ingress_path}/";'
+        f'window._INIT={json.dumps(tunnels)};'
+        f'</script>'
     )
+    html = html.replace("</head>", inject + "</head>")
     return web.Response(text=html, content_type="text/html")
 
 
