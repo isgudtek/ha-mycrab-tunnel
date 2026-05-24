@@ -12,28 +12,14 @@ from aiohttp import web, ClientSession
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/data/options.json")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data/tunnels"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-def _host_addr() -> str:
-    """Return address that reaches the host from inside this container.
-    In bridge mode the default route gateway IS the host; in host-network
-    mode the gateway is 0.0.0.0 / absent, so localhost works."""
-    try:
-        for line in Path("/proc/net/route").read_text().splitlines()[1:]:
-            parts = line.split()
-            if len(parts) >= 3 and parts[1] == "00000000":  # default route
-                gw_hex = parts[2]
-                if gw_hex == "00000000":
-                    return "127.0.0.1"  # host networking — no bridge gateway
-                gw = ".".join(str(int(gw_hex[i:i+2], 16)) for i in (6, 4, 2, 0))
-                return gw  # bridge gateway = host IP
-    except Exception:
-        pass
-    return "172.30.32.1"  # HA supervisor bridge fallback
-
-HOST_ADDR = _host_addr()
+LOGS_DIR = DATA_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
 
 TUNNELS_FILE = DATA_DIR / "tunnels.json"
 API_BASE = "https://api.mycrab.space"
+
+# With host_network: true the container IS the host — localhost always reaches HA
+HOST_ADDR = "127.0.0.1"
 
 _procs: dict[str, subprocess.Popen] = {}
 
@@ -73,14 +59,22 @@ def _cf_config_path(tunnel_id: str) -> Path:
     return DATA_DIR / f"{tunnel_id}.yml"
 
 
+def _log_path(tunnel_id: str) -> Path:
+    return LOGS_DIR / f"{tunnel_id}.log"
+
+
 def _start_proc(t: dict) -> bool:
     cfg = _cf_config_path(t["id"])
     if not cfg.exists():
         return False
+    _stop_proc(t["id"])  # kill stale process if any
+    log = open(_log_path(t["id"]), "a")
+    log.write(f"\n--- started {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} ---\n")
+    log.flush()
     proc = subprocess.Popen(
         ["cloudflared", "tunnel", "--config", str(cfg), "--no-autoupdate", "run"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
     )
     _procs[t["id"]] = proc
     return True
@@ -96,36 +90,14 @@ def _stop_proc(tunnel_id: str):
             proc.kill()
 
 
-def _write_paid_config(tunnel_id: str, subdomain: str, local_port: int, cf_token: str):
+def _write_config(tunnel_id: str, tunnel_uuid: str, subdomain: str, local_port: int, creds_path: Path):
+    """Write cloudflared config. subdomain is the public hostname (without .mycrab.space)."""
     cfg = _cf_config_path(tunnel_id)
-    creds_path = DATA_DIR / f"{tunnel_id}-creds.json"
-    cfg.write_text(
-        f"tunnel: {subdomain}\n"
-        f"credentials-file: {creds_path}\n"
-        f"ingress:\n"
-        f"  - hostname: {subdomain}.mycrab.space\n"
-        f"    service: http://{HOST_ADDR}:{local_port}\n"
-        f"  - service: http_status:404\n"
-    )
-    creds_path.write_text(json.dumps({
-        "AccountTag": "", "TunnelID": subdomain, "TunnelSecret": cf_token
-    }))
-
-
-def _write_free_config(tunnel_id: str, tunnel_uuid: str, local_port: int, creds_path: Path = None):
-    cfg = _cf_config_path(tunnel_id)
-    if creds_path is None:
-        # Try to find the actual creds file (cloudflared writes to same dir as origincert)
-        creds_path = next(
-            (p for p in [DATA_DIR / f"{tunnel_uuid}.json",
-                         DATA_DIR / f"{tunnel_id}-creds.json"] if p.exists()),
-            DATA_DIR / f"{tunnel_uuid}.json"
-        )
     cfg.write_text(
         f"tunnel: {tunnel_uuid}\n"
         f"credentials-file: {creds_path}\n"
         f"ingress:\n"
-        f"  - hostname: {tunnel_id}.mycrab.space\n"
+        f"  - hostname: {subdomain}.mycrab.space\n"
         f"    service: http://{HOST_ADDR}:{local_port}\n"
         f"  - service: http_status:404\n"
     )
@@ -133,8 +105,12 @@ def _write_free_config(tunnel_id: str, tunnel_uuid: str, local_port: int, creds_
 
 # ── mycrab provisioning ───────────────────────────────────────────────
 
+def aiohttp_timeout(seconds):
+    from aiohttp import ClientTimeout
+    return ClientTimeout(total=seconds)
+
+
 async def _poll_mycrab_field(agent_name: str, field: str, timeout: int = 600) -> dict:
-    """Poll /agent/response until status=ready and field present in data."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
@@ -154,13 +130,8 @@ async def _poll_mycrab_field(agent_name: str, field: str, timeout: int = 600) ->
     raise RuntimeError(f"mycrab API did not provide '{field}' within {timeout}s")
 
 
-def aiohttp_timeout(seconds):
-    from aiohttp import ClientTimeout
-    return ClientTimeout(total=seconds)
-
-
-async def _provision_mycrab_task(tunnel_id: str, local_port: int):
-    """Mirror the agent-setup-auto.sh provisioning flow inside the addon."""
+async def _provision_task(tunnel_id: str, subdomain: str, local_port: int):
+    """Full provisioning flow: cert.pem → cloudflared create → DNS → start."""
 
     def _update(**kwargs):
         tunnels = load_tunnels()
@@ -171,7 +142,7 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
         save_tunnels(tunnels)
 
     try:
-        # Step 1: announce + request cert.pem
+        # Step 1: announce
         async with ClientSession() as s:
             await s.post(f"{API_BASE}/agent/message",
                          json={"agent_name": tunnel_id, "message": "Starting autonomous setup"},
@@ -189,9 +160,9 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
         cert_path.chmod(0o600)
 
         # Step 3: cloudflared tunnel create
-        env = {**os.environ, "HOME": "/root"}
+        env = {**os.environ, "HOME": str(DATA_DIR)}
         result = subprocess.run(
-            ["cloudflared", "--origincert", str(cert_path), "tunnel", "create", tunnel_id],
+            ["cloudflared", "--origincert", str(cert_path), "tunnel", "create", subdomain],
             capture_output=True, text=True, timeout=30, env=env
         )
         m = re.search(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
@@ -199,43 +170,44 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
         if not m:
             # Already exists? try tunnel info
             info = subprocess.run(
-                ["cloudflared", "--origincert", str(cert_path), "tunnel", "info", tunnel_id],
+                ["cloudflared", "--origincert", str(cert_path), "tunnel", "info", subdomain],
                 capture_output=True, text=True, timeout=30, env=env
             )
             m = re.search(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
                           info.stdout + info.stderr)
         if not m:
-            raise RuntimeError(f"cloudflared create failed: {result.stderr[-300:]}")
+            raise RuntimeError(f"cloudflared create failed: {result.stderr[-400:]}")
 
         uuid = m.group(0)
 
-        # cloudflared writes creds to same dir as origincert or ~/.cloudflared/
+        # cloudflared writes creds to $HOME/.cloudflared/ or same dir as cert
         creds_actual = next(
             (p for p in [
                 DATA_DIR / f"{uuid}.json",
+                DATA_DIR / ".cloudflared" / f"{uuid}.json",
                 Path(f"/root/.cloudflared/{uuid}.json"),
             ] if p.exists()),
             None
         )
         if creds_actual is None:
-            raise RuntimeError(f"Credentials file not found after tunnel create (uuid={uuid})")
+            raise RuntimeError(f"Credentials not found after tunnel create (uuid={uuid})")
 
-        # Step 4: send tunnel_id so operator sets up DNS record
+        # Step 4: send UUID so mycrab sets up DNS
         async with ClientSession() as s:
             await s.post(f"{API_BASE}/agent/message",
-                         json={"agent_name": tunnel_id, "message": "Tunnel created successfully",
-                               "tunnel_id": uuid, "tunnel_name": tunnel_id},
+                         json={"agent_name": tunnel_id, "message": "Tunnel created",
+                               "tunnel_id": uuid, "tunnel_name": subdomain},
                          timeout=aiohttp_timeout(10))
 
-        # Step 5: wait for config_yml (signals DNS is live)
+        # Step 5: wait for config_yml (DNS live signal)
         await _poll_mycrab_field(tunnel_id, "config_yml", timeout=600)
 
-        # Step 6: write our own config with correct container paths
-        _write_free_config(tunnel_id, uuid, local_port, creds_actual)
+        # Step 6: write config with container paths
+        _write_config(tunnel_id, uuid, subdomain, local_port, creds_actual)
 
-        # Step 7: update record, start tunnel
-        _update(provision_status="live", url=f"https://{tunnel_id}.mycrab.space",
-                subdomain=tunnel_id)
+        # Step 7: mark live and start
+        _update(provision_status="live", url=f"https://{subdomain}.mycrab.space",
+                subdomain=subdomain, tunnel_uuid=uuid)
 
         t = next((t for t in load_tunnels() if t["id"] == tunnel_id), None)
         if t:
@@ -243,8 +215,8 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
 
         async with ClientSession() as s:
             await s.post(f"{API_BASE}/agent/message",
-                         json={"agent_name": tunnel_id, "message": "Setup completed successfully!",
-                               "subdomain": f"{tunnel_id}.mycrab.space", "status": "live"},
+                         json={"agent_name": tunnel_id, "message": "Setup completed!",
+                               "subdomain": f"{subdomain}.mycrab.space", "status": "live"},
                          timeout=aiohttp_timeout(10))
 
     except Exception as e:
@@ -252,16 +224,14 @@ async def _provision_mycrab_task(tunnel_id: str, local_port: int):
 
 
 async def provision_free(name: str, local_port: int) -> dict:
-    """Start mycrab free tunnel via API (same flow as agent-setup-auto.sh). Returns immediately."""
     tunnel_id = f"agent-{random.randint(0, 999999):06d}"
     tunnel = {
         "id": tunnel_id,
-        "name": name or "Home Assistant",
+        "name": name or "mycrab Tunnel",
         "subdomain": tunnel_id,
         "url": f"https://{tunnel_id}.mycrab.space",
         "local_port": local_port,
         "tier": "free",
-        "expires_at": None,
         "created_at": int(time.time()),
         "provision_status": "pending",
     }
@@ -269,12 +239,11 @@ async def provision_free(name: str, local_port: int) -> dict:
     tunnels = [t for t in tunnels if t["id"] != tunnel_id]
     tunnels.append(tunnel)
     save_tunnels(tunnels)
-    asyncio.create_task(_provision_mycrab_task(tunnel_id, local_port))
+    asyncio.create_task(_provision_task(tunnel_id, tunnel_id, local_port))
     return tunnel
 
 
 async def provision_paid(token: str, name: str, local_port: int) -> dict:
-    """Verify token, get subdomain, run same provisioning flow as free tunnels."""
     async with ClientSession() as session:
         async with session.post(f"{API_BASE}/verify-token",
                                 json={"token": token},
@@ -282,25 +251,46 @@ async def provision_paid(token: str, name: str, local_port: int) -> dict:
             data = await r.json()
 
     if not data.get("valid"):
-        raise ValueError(f"Invalid token: {data.get('error','unknown error')}")
+        raise ValueError(f"Invalid token: {data.get('error', 'unknown')}")
 
     subdomain = data.get("subdomain", "").strip()
     if not subdomain:
         raise ValueError("Token valid but no subdomain returned")
 
-    # Use subdomain directly as tunnel_id — same provisioning flow as free
+    tunnel_id = subdomain  # id == subdomain for paid tunnels
     tunnel = {
-        "id": subdomain,
+        "id": tunnel_id,
         "name": name or subdomain,
         "subdomain": subdomain,
         "url": f"https://{subdomain}.mycrab.space",
         "local_port": local_port,
         "tier": "paid",
-        "expires_at": None,
         "created_at": int(time.time()),
         "provision_status": "pending",
     }
+    tunnels = load_tunnels()
+    tunnels = [t for t in tunnels if t["id"] != tunnel_id]
+    tunnels.append(tunnel)
+    save_tunnels(tunnels)
+    asyncio.create_task(_provision_task(tunnel_id, subdomain, local_port))
     return tunnel
+
+
+# ── Health monitor ────────────────────────────────────────────────────
+
+async def _health_monitor():
+    """Restart cloudflared processes that die unexpectedly."""
+    await asyncio.sleep(30)
+    while True:
+        tunnels = load_tunnels()
+        for t in tunnels:
+            if t.get("provision_status") != "live":
+                continue
+            proc = _procs.get(t["id"])
+            if proc and proc.poll() is not None:
+                # Process died — restart
+                _start_proc(t)
+        await asyncio.sleep(30)
 
 
 # ── Routes ───────────────────────────────────────────────────────────
@@ -326,18 +316,29 @@ async def api_create(request):
     try:
         if token:
             tunnel = await provision_paid(token, name, local_port)
-            tunnels = load_tunnels()
-            tunnels = [t for t in tunnels if t["id"] != tunnel["id"]]
-            tunnels.append(tunnel)
-            save_tunnels(tunnels)
-            asyncio.create_task(_provision_mycrab_task(tunnel["id"], local_port))
         else:
             tunnel = await provision_free(name, local_port)
-            # already saved + background task started inside provision_free
     except Exception as e:
         return web.json_response({"error": str(e)}, status=400)
 
     return web.json_response(tunnel)
+
+
+async def api_reprovision(request):
+    """Re-run provisioning for a failed or stuck tunnel."""
+    tid = request.match_info["id"]
+    tunnels = load_tunnels()
+    t = next((x for x in tunnels if x["id"] == tid), None)
+    if not t:
+        return web.json_response({"error": "not found"}, status=404)
+
+    _stop_proc(tid)
+    t["provision_status"] = "pending"
+    t.pop("error", None)
+    save_tunnels(tunnels)
+
+    asyncio.create_task(_provision_task(tid, t["subdomain"], t["local_port"]))
+    return web.json_response({"ok": True})
 
 
 async def api_update_port(request):
@@ -348,18 +349,17 @@ async def api_update_port(request):
     for t in tunnels:
         if t["id"] == tid:
             t["local_port"] = new_port
-            _stop_proc(tid)
-            if t.get("tier") == "free":
-                # Read UUID from existing config file
-                cfg = _cf_config_path(tid)
-                uuid = tid
-                if cfg.exists():
-                    m = re.search(r'^tunnel:\s*(\S+)', cfg.read_text(), re.MULTILINE)
-                    if m:
-                        uuid = m.group(1)
-                _write_free_config(tid, uuid, new_port)
-            else:
-                _write_paid_config(tid, t["subdomain"], new_port, "")
+            # Rewrite config with new port (preserve existing uuid/subdomain)
+            cfg = _cf_config_path(tid)
+            if cfg.exists():
+                text = cfg.read_text()
+                m_uuid = re.search(r'^tunnel:\s*(\S+)', text, re.MULTILINE)
+                m_creds = re.search(r'^credentials-file:\s*(\S+)', text, re.MULTILINE)
+                if m_uuid and m_creds:
+                    _stop_proc(tid)
+                    _write_config(tid, m_uuid.group(1), t.get("subdomain", tid),
+                                  new_port, Path(m_creds.group(1)))
+                    _start_proc(t)
             break
     save_tunnels(tunnels)
     return web.json_response({"ok": True})
@@ -371,8 +371,8 @@ async def api_start(request):
     t = next((x for x in tunnels if x["id"] == tid), None)
     if not t:
         return web.json_response({"error": "not found"}, status=404)
-    if t.get("provision_status") == "pending":
-        return web.json_response({"error": "Still provisioning, please wait."}, status=400)
+    if t.get("provision_status") not in ("live", None):
+        return web.json_response({"error": "Tunnel not yet provisioned"}, status=400)
     ok = _start_proc(t)
     return web.json_response({"ok": ok})
 
@@ -389,8 +389,17 @@ async def api_delete(request):
     tunnels = [t for t in load_tunnels() if t["id"] != tid]
     save_tunnels(tunnels)
     _cf_config_path(tid).unlink(missing_ok=True)
-    (DATA_DIR / f"{tid}-creds.json").unlink(missing_ok=True)
+    _log_path(tid).unlink(missing_ok=True)
     return web.json_response({"ok": True})
+
+
+async def api_logs(request):
+    tid = request.match_info["id"]
+    log = _log_path(tid)
+    if not log.exists():
+        return web.json_response({"lines": []})
+    lines = log.read_text().splitlines()[-100:]
+    return web.json_response({"lines": lines})
 
 
 async def api_status(request):
@@ -401,6 +410,7 @@ async def api_status(request):
         "running": statuses.count("running"),
         "stopped": statuses.count("stopped"),
         "pending": statuses.count("pending"),
+        "failed": statuses.count("failed"),
     })
 
 
@@ -412,10 +422,10 @@ async def api_config(request):
 # ── App ──────────────────────────────────────────────────────────────
 
 async def on_startup(app):
-    # Auto-start live tunnels that were running before restart
     for t in load_tunnels():
         if t.get("provision_status") == "live":
             _start_proc(t)
+    asyncio.create_task(_health_monitor())
 
 
 app = web.Application()
@@ -427,8 +437,10 @@ app.router.add_get("/api/tunnels", api_tunnels)
 app.router.add_post("/api/tunnels", api_create)
 app.router.add_post("/api/tunnels/{id}/start", api_start)
 app.router.add_post("/api/tunnels/{id}/stop", api_stop)
+app.router.add_post("/api/tunnels/{id}/reprovision", api_reprovision)
 app.router.add_patch("/api/tunnels/{id}/port", api_update_port)
 app.router.add_delete("/api/tunnels/{id}", api_delete)
+app.router.add_get("/api/tunnels/{id}/logs", api_logs)
 app.router.add_post("/api/tunnels/purge-expired", lambda r: web.json_response({"ok": True}))
 app.router.add_get("/api/status", api_status)
 app.router.add_get("/api/config", api_config)

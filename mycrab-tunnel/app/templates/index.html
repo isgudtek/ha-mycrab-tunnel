@@ -5,224 +5,168 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>mycrab Tunnel</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg: #111827;
-    --surface: #1c2331;
-    --surface2: #243040;
-    --border: #2d3b4f;
-    --border-bright: #3d5170;
-    --text: #e8ecf4;
-    --muted: #7a8fa8;
-    --accent: #03a9f4;
-    --accent-dim: rgba(3,169,244,0.12);
-    --accent-glow: rgba(3,169,244,0.25);
-    --green: #4caf50;
-    --green-dim: rgba(76,175,80,0.12);
-    --red: #f44336;
-    --red-dim: rgba(244,67,54,0.1);
-    --radius: 12px;
-    --radius-sm: 8px;
-  }
-
-  body { font-family: 'Roboto', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
-  .shell { display: grid; grid-template-rows: 64px 1fr; min-height: 100vh; }
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1f2e;
+    --surface2: #232a3b;
+    --border: #2a3347;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --accent: #3b82f6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --radius: 10px;
+  }
+
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
 
   header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 0 24px; border-bottom: 1px solid var(--border);
+    padding: 0 20px; height: 56px; border-bottom: 1px solid var(--border);
     background: var(--surface); position: sticky; top: 0; z-index: 100;
   }
-  .header-left { display: flex; align-items: center; gap: 16px; }
-  .logo { display: flex; align-items: center; gap: 10px; font-weight: 500; font-size: 15px; }
-  .logo-icon { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; }
-  .logo-icon svg { width: 18px; height: 18px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+  .logo svg { color: var(--accent); }
 
-  .nav-tabs { display: flex; gap: 0; }
-  .nav-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; border: none; background: none; font-family: inherit; }
-  .nav-tab:hover { color: var(--text); }
-  .nav-tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+  .pill { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+  .pill.running { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
+  .pill.idle { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .dot.pulse { animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
 
-  .status-pill { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; background: var(--green-dim); color: var(--green); border: 1px solid rgba(76,175,80,0.2); }
-  .status-pill.idle { background: var(--surface2); color: var(--muted); border-color: var(--border); }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 20px; }
 
-  main { padding: 24px; max-width: 1000px; margin: 0 auto; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .stat-val { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .stat-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
 
-  /* Tab panels */
-  .panel { display: none; }
-  .panel.active { display: block; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .toolbar-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
 
-  /* HA Dashboard panel */
-  .ha-frame-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; height: calc(100vh - 120px); display: flex; flex-direction: column; }
-  .ha-frame-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-  .ha-url-display { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  iframe { border: none; flex: 1; width: 100%; }
-  .ha-no-tunnel { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 16px; padding: 40px; text-align: center; }
-  .ha-no-tunnel p { color: var(--muted); max-width: 340px; }
-
-  /* Tunnels panel */
-  .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 24px; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
-  .stat-val { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
-  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .section-title { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all .15s ease; font-family: inherit; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: opacity .15s, background .15s; font-family: inherit; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #29b6f6; box-shadow: 0 4px 16px var(--accent-glow); }
+  .btn-primary:hover:not(:disabled) { opacity: .88; }
   .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-  .btn-ghost:hover { background: var(--surface2); color: var(--text); border-color: var(--border-bright); }
-  .btn-sm { padding: 5px 12px; font-size: 12px; }
-  .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(244,67,54,.2); }
-  .btn-danger:hover { background: rgba(244,67,54,.2); }
-  .btn-success { background: var(--green-dim); color: var(--green); border: 1px solid rgba(76,175,80,.2); }
-  .btn-success:hover { background: rgba(76,175,80,.2); }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-ghost:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+  .btn-danger { background: rgba(239,68,68,.1); color: var(--red); border: 1px solid rgba(239,68,68,.2); }
+  .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.18); }
+  .btn-sm { padding: 5px 11px; font-size: 12px; }
+  .btn-green { background: rgba(34,197,94,.1); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
+  .btn-green:hover:not(:disabled) { background: rgba(34,197,94,.18); }
 
   .tunnels { display: flex; flex-direction: column; gap: 10px; }
-  .tunnel-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color .15s; }
-  .tunnel-card:hover { border-color: var(--border-bright); }
-  .tunnel-card.running { border-left: 3px solid var(--green); }
-  .tunnel-card.stopped { border-left: 3px solid var(--border-bright); }
-  .tunnel-card.pending { border-left: 3px solid var(--accent); background: var(--surface); }
-  .tunnel-card.failed { border-left: 3px solid var(--red); }
-  .badge-pending { background: var(--accent-dim); color: var(--accent); animation: pulse 2s infinite; }
-  .badge-failed { background: var(--red-dim); color: var(--red); }
-  .pending-info { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-  .spin-sm { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--accent-dim); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  .t-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .t-card.running { border-left: 3px solid var(--green); }
+  .t-card.stopped { border-left: 3px solid var(--border); }
+  .t-card.pending { border-left: 3px solid var(--accent); }
+  .t-card.failed  { border-left: 3px solid var(--red); }
+
+  .t-inner { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 14px 18px; align-items: center; }
+  .t-name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .badge-free { background: rgba(59,130,246,.12); color: var(--accent); }
+  .badge-paid { background: rgba(245,158,11,.12); color: var(--orange); }
+  .badge-running { background: rgba(34,197,94,.12); color: var(--green); }
+  .badge-stopped { background: var(--surface2); color: var(--muted); }
+  .badge-pending { background: rgba(59,130,246,.12); color: var(--accent); }
+  .badge-failed  { background: rgba(239,68,68,.12); color: var(--red); }
+  .t-url { font-family: monospace; font-size: 12px; color: var(--accent); margin-bottom: 5px; }
+  .t-url a { color: inherit; text-decoration: none; }
+  .t-url a:hover { text-decoration: underline; }
+  .t-meta { font-size: 11px; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .t-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .pending-bar { padding: 8px 18px; border-top: 1px solid var(--border); background: rgba(59,130,246,.05); display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(59,130,246,.2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .tunnel-inner { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 16px 20px; gap: 16px; }
-  .tunnel-name { font-weight: 500; font-size: 15px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
-  .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .05em; }
-  .badge-green { background: var(--green-dim); color: var(--green); }
-  .badge-muted { background: var(--surface2); color: var(--muted); }
-  .tunnel-url { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); margin-bottom: 4px; cursor: pointer; }
-  .tunnel-url:hover { text-decoration: underline; }
-  .tunnel-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .port-edit-wrap { display: inline-flex; align-items: center; gap: 4px; }
-  .port-editor { display: inline-flex; align-items: center; gap: 4px; }
-  .tunnel-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-  .empty { text-align: center; padding: 64px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-  .empty h3 { font-size: 18px; font-weight: 500; margin-bottom: 8px; }
-  .empty p { color: var(--muted); max-width: 340px; margin: 0 auto 24px; }
+  .error-bar { padding: 8px 18px; border-top: 1px solid rgba(239,68,68,.2); background: rgba(239,68,68,.06); font-size: 11px; color: var(--red); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .error-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .port-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 3px 8px; font-size: 11px; font-family: monospace; width: 72px; outline: none; }
+  .port-input:focus { border-color: var(--accent); }
+
+  .empty { text-align: center; padding: 56px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .empty h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+  .empty p { color: var(--muted); max-width: 320px; margin: 0 auto 20px; line-height: 1.6; }
+
+  /* Modal */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; }
   .overlay.open { opacity: 1; pointer-events: all; }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 480px; padding: 28px; transform: translateY(12px); transition: transform .2s; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 460px; padding: 26px; transform: translateY(10px); transition: transform .2s; }
   .overlay.open .modal { transform: translateY(0); }
-  .modal h2 { font-size: 18px; font-weight: 500; margin-bottom: 6px; }
-  .modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
-  .form-group { margin-bottom: 18px; }
-  label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
-  input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: inherit; font-size: 14px; transition: border-color .15s; outline: none; }
-  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .modal h2 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .modal-sub { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .06em; }
+  input[type=text], input[type=number] { width: 100%; padding: 9px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 13px; outline: none; transition: border-color .15s; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
   input::placeholder { color: var(--muted); }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .hint a { color: var(--accent); text-decoration: none; }
-  .token-row { display: flex; gap: 8px; }
-  .token-row input { flex: 1; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-  .quick-ports { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .port-chip { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; transition: all .1s; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
-  .port-chip:hover { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-  .modal-actions { display: flex; gap: 10px; margin-top: 24px; }
+  .token-wrap { position: relative; }
+  .token-wrap input { padding-right: 70px; font-family: monospace; font-size: 12px; }
+  .token-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  .token-clear:hover { color: var(--red); }
+  .port-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+  .port-chip { padding: 3px 9px; border-radius: 5px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); cursor: pointer; color: var(--muted); font-family: monospace; transition: all .1s; }
+  .port-chip:hover { background: rgba(59,130,246,.1); border-color: var(--accent); color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; margin-top: 22px; }
   .modal-actions .btn { flex: 1; justify-content: center; }
-  .error-box { background: var(--red-dim); border: 1px solid rgba(244,67,54,.3); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--red); font-size: 13px; margin-top: 16px; display: none; }
+  .form-error { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.25); border-radius: 8px; padding: 9px 12px; color: var(--red); font-size: 12px; margin-top: 14px; display: none; }
 
-  .progress-steps { margin: 20px 0; }
-  .step-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; color: var(--muted); transition: color .3s; }
-  .step-item.active { color: var(--text); }
-  .step-item.done { color: var(--green); }
-  .step-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; transition: all .3s; }
-  .step-item.active .step-dot { border-color: var(--accent); background: var(--accent-dim); }
-  .step-item.done .step-dot { border-color: var(--green); background: var(--green-dim); color: var(--green); }
+  /* Logs modal */
+  .logs-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 11px; color: var(--muted); max-height: 360px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin-top: 14px; line-height: 1.6; }
 
-  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2); border-top-color: currentColor; border-radius: 50%; animation: spin .6s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); padding: 10px 20px; border-radius: 20px; font-size: 13px; transition: transform .25s ease; z-index: 300; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border); padding: 8px 18px; border-radius: 20px; font-size: 13px; transition: transform .25s; z-index: 300; white-space: nowrap; }
   .toast.show { transform: translateX(-50%) translateY(0); }
 
-  @media (max-width: 600px) {
-    .stats { grid-template-columns: 1fr 1fr; }
-    .tunnel-inner { grid-template-columns: 1fr; }
-    .nav-tab { padding: 8px 10px; font-size: 12px; }
+  @media (max-width: 560px) {
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .t-inner { grid-template-columns: 1fr; }
+    .t-actions { flex-wrap: wrap; }
   }
 </style>
 </head>
 <body>
-<div class="shell">
-  <header>
-    <div class="header-left">
-      <div class="logo">
-        <div class="logo-icon">
-          <svg viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z"/></svg>
-        </div>
-        mycrab Tunnel
-      </div>
-      <nav class="nav-tabs">
-        <button class="nav-tab active" onclick="showPanel('tunnels', this)">Tunnels</button>
-        <button class="nav-tab" onclick="showPanel('ha', this)">HA Dashboard</button>
-      </nav>
-    </div>
-    <div id="global-pill" class="status-pill idle"><span class="dot"></span><span id="status-text">Loading…</span></div>
-  </header>
 
-  <main>
-    <!-- Tunnels panel -->
-    <div class="panel active" id="panel-tunnels">
-      <div class="stats">
-        <div class="stat"><div class="stat-val" id="stat-total" style="color:var(--accent)">—</div><div class="stat-label">Tunnels</div></div>
-        <div class="stat"><div class="stat-val" id="stat-running" style="color:var(--green)">—</div><div class="stat-label">Running</div></div>
-        <div class="stat"><div class="stat-val" id="stat-stopped" style="color:var(--muted)">—</div><div class="stat-label">Stopped</div></div>
-      </div>
+<header>
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    mycrab Tunnel
+  </div>
+  <div id="hdr-pill" class="pill idle"><span class="dot"></span><span id="hdr-text">Loading…</span></div>
+</header>
 
-      <div class="section-header">
-        <div class="section-title">Active tunnels</div>
-        <button class="btn btn-primary" onclick="openCreate()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New tunnel
-        </button>
-      </div>
-      <div class="tunnels" id="tunnels-list"></div>
-    </div>
+<main>
+  <div class="stats">
+    <div class="stat"><div class="stat-val" id="s-total" style="color:var(--accent)">—</div><div class="stat-lbl">Tunnels</div></div>
+    <div class="stat"><div class="stat-val" id="s-running" style="color:var(--green)">—</div><div class="stat-lbl">Running</div></div>
+    <div class="stat"><div class="stat-val" id="s-stopped" style="color:var(--muted)">—</div><div class="stat-lbl">Stopped</div></div>
+  </div>
 
-    <!-- HA Dashboard panel -->
-    <div class="panel" id="panel-ha">
-      <div class="ha-frame-wrap">
-        <div class="ha-frame-bar">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--accent)"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-          <span id="ha-url-label" class="ha-url-display">No tunnel to Home Assistant yet</span>
-          <button class="btn btn-sm btn-ghost" onclick="openHaInTab()">Open in tab →</button>
-          <button class="btn btn-sm btn-primary" onclick="createHaTunnel()">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Tunnel HA
-          </button>
-        </div>
-        <div id="ha-iframe-area" class="ha-no-tunnel">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="var(--accent)" opacity=".4"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
-          <p>Create a tunnel to Home Assistant (port 8123) to view the dashboard here.</p>
-          <button class="btn btn-primary" onclick="createHaTunnel()">Launch HA tunnel</button>
-        </div>
-      </div>
-    </div>
-  </main>
-</div>
+  <div class="toolbar">
+    <div class="toolbar-title">Tunnels</div>
+    <button class="btn btn-primary" onclick="openCreate()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New tunnel
+    </button>
+  </div>
+  <div class="tunnels" id="list"></div>
+</main>
 
-<!-- Create Tunnel Modal -->
-<div class="overlay" id="create-modal" onclick="if(event.target===this)closeCreate()">
+<!-- Create Modal -->
+<div class="overlay" id="create-overlay" onclick="if(event.target===this)closeCreate()">
   <div class="modal">
     <h2>New tunnel</h2>
-    <p class="sub">Expose any local port via a secure HTTPS URL — free, no Cloudflare account needed.</p>
+    <p class="modal-sub">Expose any local service via a secure mycrab.space URL — no Cloudflare account needed.</p>
 
     <div class="form-group">
       <label>Service name</label>
@@ -232,37 +176,46 @@
     <div class="form-group">
       <label>Local port</label>
       <input id="m-port" type="number" value="8123" min="1" max="65535">
-      <div class="quick-ports">
+      <div class="port-chips">
         <span class="port-chip" onclick="setPort(8123)">8123 HA</span>
-        <span class="port-chip" onclick="setPort(5005)">5005 Frigate</span>
-        <span class="port-chip" onclick="setPort(1880)">1880 Node-RED</span>
-        <span class="port-chip" onclick="setPort(8883)">8883 MQTT</span>
-        <span class="port-chip" onclick="setPort(3000)">3000 Grafana</span>
-        <span class="port-chip" onclick="setPort(9090)">9090 Prometheus</span>
+        <span class="port-chip" onclick="setPort(1883)">1883 MQTT</span>
+        <span class="port-chip" onclick="setPort(8554)">8554 RTSP</span>
+        <span class="port-chip" onclick="setPort(5000)">5000</span>
+        <span class="port-chip" onclick="setPort(3000)">3000</span>
+        <span class="port-chip" onclick="setPort(80)">80</span>
       </div>
     </div>
 
     <div class="form-group">
-      <label>Custom domain token <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-      <div class="token-row">
-        <input id="m-token" type="text" placeholder="Blank = free random URL">
-        <a href="https://mycrab.space/domain-select.html" target="_blank" class="btn btn-ghost btn-sm" style="white-space:nowrap;text-decoration:none">Get one →</a>
+      <label>Vanity token <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — for custom subdomain)</span></label>
+      <div class="token-wrap">
+        <input id="m-token" type="text" placeholder="Leave empty for a free agent-XXXXXX subdomain">
+        <span class="token-clear" onclick="clearToken()" title="Clear">✕ clear</span>
       </div>
-      <div class="hint">Free tier gives a random subdomain. <a href="https://mycrab.space/domain-select.html" target="_blank">$14.99/yr</a> for a permanent name.</div>
+      <div class="hint">Get a vanity token at <a href="https://mycrab.space" target="_blank">mycrab.space</a></div>
     </div>
 
-    <div class="progress-steps" id="progress" style="display:none">
-      <div class="step-item" id="step-1"><div class="step-dot">1</div> Requesting tunnel</div>
-      <div class="step-item" id="step-2"><div class="step-dot">2</div> Establishing connection</div>
-      <div class="step-item" id="step-3"><div class="step-dot">3</div> Starting cloudflared</div>
-      <div class="step-item" id="step-4"><div class="step-dot">✓</div> Ready</div>
-    </div>
+    <div id="form-error" class="form-error"></div>
 
-    <div class="error-box" id="modal-err"></div>
-
-    <div class="modal-actions" id="modal-btns">
+    <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeCreate()">Cancel</button>
-      <button class="btn btn-primary" id="btn-create" onclick="createTunnel()">Create tunnel</button>
+      <button class="btn btn-primary" id="btn-create" onclick="submitCreate()">
+        <span id="create-label">Create tunnel</span>
+        <span id="create-spin" class="spin" style="display:none"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Logs Modal -->
+<div class="overlay" id="logs-overlay" onclick="if(event.target===this)closeLogs()">
+  <div class="modal" style="max-width:620px">
+    <h2>Tunnel logs</h2>
+    <p class="modal-sub" id="logs-title"></p>
+    <pre class="logs-pre" id="logs-pre">Loading…</pre>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeLogs()">Close</button>
+      <button class="btn btn-primary btn-sm" onclick="refreshLogs()">Refresh</button>
     </div>
   </div>
 </div>
@@ -270,239 +223,239 @@
 <div class="toast" id="toast"></div>
 
 <script>
-let tunnels = [];
-let haUrl = null;
+let _tunnels = [];
+let _pollTimer = null;
+let _logsId = null;
 
-// Under HA ingress the base path changes — use location-relative URLs
-const BASE = window.location.pathname.replace(/\/[^/]*$/, '');
-function api(path) { return BASE + path; }
-
-async function load() {
-  try {
-    const [tRes, sRes] = await Promise.all([fetch(api('/api/tunnels')), fetch(api('/api/status'))]);
-    tunnels = await tRes.json();
-    const s = await sRes.json();
-    document.getElementById('stat-total').textContent = s.total;
-    document.getElementById('stat-running').textContent = s.running;
-    document.getElementById('stat-stopped').textContent = s.stopped;
-    const pill = document.getElementById('global-pill');
-    const txt = document.getElementById('status-text');
-    if (s.running > 0) { pill.className='status-pill'; txt.textContent=`${s.running} active`; }
-    else if (!s.total) { pill.className='status-pill idle'; txt.textContent='No tunnels'; }
-    else { pill.className='status-pill idle'; txt.textContent='All stopped'; }
-    renderTunnels(tunnels);
-    updateHaPanel(tunnels);
-  } catch(e) { console.error(e); }
-}
-
-function updateHaPanel(list) {
-  const haTunnel = list.find(t => t.local_port === 8123 && t.status === 'running');
-  const label = document.getElementById('ha-url-label');
-  const area = document.getElementById('ha-iframe-area');
-  if (haTunnel) {
-    haUrl = haTunnel.url;
-    label.textContent = haTunnel.url;
-    // Load HA in iframe if not already loaded
-    const existing = area.querySelector('iframe');
-    if (!existing || existing.src !== haTunnel.url) {
-      area.innerHTML = `<iframe src="${haTunnel.url}" allow="fullscreen" title="Home Assistant Dashboard"></iframe>`;
-    }
-  } else {
-    haUrl = null;
-    label.textContent = 'No tunnel to Home Assistant yet';
-    if (!area.querySelector('.ha-no-tunnel')) {
-      area.innerHTML = `<div class="ha-no-tunnel"><svg width="48" height="48" viewBox="0 0 24 24" fill="var(--accent)" opacity=".4"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><p>Create a tunnel to Home Assistant (port 8123) to view the dashboard here.</p><button class="btn btn-primary" onclick="createHaTunnel()">Launch HA tunnel</button></div>`;
-    }
-  }
-}
-
-function showPanel(name, tab) {
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('panel-' + name).classList.add('active');
-  tab.classList.add('active');
-}
-
-function openHaInTab() { if (haUrl) window.open(haUrl, '_blank'); }
-
-function createHaTunnel() {
-  document.getElementById('m-name').value = 'Home Assistant';
-  document.getElementById('m-port').value = '8123';
-  openCreate();
-}
-
-function badgeClass(s){ return s==='running'?'badge-green':s==='pending'?'badge-pending':s==='failed'?'badge-failed':'badge-muted'; }
-
-function renderTunnels(list) {
-  const el = document.getElementById('tunnels-list');
-  if (!list.length) {
-    el.innerHTML = `<div class="empty"><h3>No tunnels yet</h3><p>Create your first free mycrab tunnel — get a permanent <strong>agent-XXXXXX.mycrab.space</strong> URL with no port forwarding needed.</p><button class="btn btn-primary" onclick="openCreate()">Create your first tunnel</button></div>`;
-    return;
-  }
-  el.innerHTML = list.map(t => {
-    const isPending = t.status === 'pending';
-    const isFailed = t.status === 'failed';
-    const isRunning = t.status === 'running';
-    const isStopped = t.status === 'stopped';
-
-    const portDisplay = isStopped
-      ? `<span class="port-edit-wrap">→ localhost:<span class="port-val" id="port-val-${t.id}">${t.local_port}</span>
-          <span class="port-editor" id="port-editor-${t.id}" style="display:none">
-            <input type="number" id="port-input-${t.id}" value="${t.local_port}" min="1" max="65535" style="width:70px;padding:2px 6px;font-size:11px;background:var(--bg);border:1px solid var(--accent);border-radius:4px;color:var(--text)">
-            <button class="btn btn-sm btn-primary" style="padding:2px 8px;font-size:11px" onclick="savePort('${t.id}')">Save</button>
-            <button class="btn btn-sm btn-ghost" style="padding:2px 8px;font-size:11px" onclick="cancelPort('${t.id}',${t.local_port})">✕</button>
-          </span>
-          <svg id="port-pencil-${t.id}" onclick="editPort('${t.id}')" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="cursor:pointer;margin-left:4px;opacity:.5;flex-shrink:0"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </span>`
-      : `→ localhost:${t.local_port}`;
-
-    const actions = isPending ? `
-      <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-      </button>` : `
-      <a href="${esc(t.url)}" target="_blank" class="btn btn-sm btn-ghost" style="text-decoration:none" title="Open">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-      </a>
-      ${isRunning
-        ? `<button class="btn btn-sm btn-danger" onclick="stopTunnel('${t.id}')">Stop</button>`
-        : `<button class="btn btn-sm btn-success" onclick="startTunnel('${t.id}')">Start</button>`}
-      <button class="btn btn-sm btn-ghost" onclick="copyUrl('${esc(t.url)}')" title="Copy">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      </button>
-      <button class="btn btn-sm btn-ghost" style="color:var(--red)" onclick="deleteTunnel('${t.id}','${esc(t.name)}')" title="Delete">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-      </button>`;
-
-    const statusLine = isPending
-      ? `<div class="pending-info"><span class="spin-sm"></span> Provisioning tunnel with mycrab…</div>`
-      : isFailed
-      ? `<div class="pending-info" style="color:var(--red)">Failed: ${esc(t.error||'unknown error')}</div>`
-      : `<div class="tunnel-url" onclick="copyUrl('${esc(t.url)}')" title="Click to copy">${esc(t.url)}</div>`;
-
-    return `
-    <div class="tunnel-card ${t.status}">
-      <div class="tunnel-inner">
-        <div>
-          <div class="tunnel-name">${esc(t.name)}<span class="badge ${badgeClass(t.status)}">${t.status}</span></div>
-          ${statusLine}
-          <div class="tunnel-meta">${portDisplay}<span>${t.tier==='free'?'free mycrab':'paid mycrab'}</span></div>
-        </div>
-        <div class="tunnel-actions">${actions}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function editPort(id) {
-  document.getElementById('port-val-' + id).style.display = 'none';
-  document.getElementById('port-pencil-' + id).style.display = 'none';
-  document.getElementById('port-editor-' + id).style.display = 'inline-flex';
-  document.getElementById('port-input-' + id).focus();
-}
-function cancelPort(id, orig) {
-  document.getElementById('port-val-' + id).style.display = '';
-  document.getElementById('port-pencil-' + id).style.display = '';
-  document.getElementById('port-editor-' + id).style.display = 'none';
-  document.getElementById('port-input-' + id).value = orig;
-}
-async function savePort(id) {
-  const port = parseInt(document.getElementById('port-input-' + id).value);
-  if (!port || port < 1 || port > 65535) { toast('Invalid port'); return; }
-  const r = await fetch(api(`/api/tunnels/${id}/port`), {
-    method: 'PATCH', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({local_port: port})
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined
   });
-  const d = await r.json();
-  if (!r.ok) { toast(d.error || 'Failed'); return; }
-  toast(`Port updated → ${port}`);
-  await load();
+  return r.json();
 }
 
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function setPort(p){ document.getElementById('m-port').value=p; }
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
 
-async function openCreate(){
-  document.getElementById('create-modal').classList.add('open');
-  document.getElementById('m-name').focus();
-  const tok = document.getElementById('m-token');
-  if (!tok.value) {
-    try {
-      const cfg = await fetch(api('/api/config')).then(r=>r.json());
-      if (cfg.default_token) tok.value = cfg.default_token;
-    } catch{}
+function statusBadge(s) {
+  const map = {
+    running: '<span class="badge badge-running">running</span>',
+    stopped: '<span class="badge badge-stopped">stopped</span>',
+    pending: '<span class="badge badge-pending">provisioning…</span>',
+    failed:  '<span class="badge badge-failed">failed</span>',
+  };
+  return map[s] || `<span class="badge badge-stopped">${s}</span>`;
+}
+
+function tierBadge(t) {
+  return t === 'paid'
+    ? '<span class="badge badge-paid">vanity</span>'
+    : '<span class="badge badge-free">free</span>';
+}
+
+function renderTunnel(t) {
+  const s = t.status;
+  const isRunning = s === 'running';
+  const isPending = s === 'pending';
+  const isFailed  = s === 'failed';
+  const isStopped = s === 'stopped';
+
+  const urlHtml = t.url
+    ? `<div class="t-url"><a href="${t.url}" target="_blank">${t.url}</a></div>`
+    : `<div class="t-url" style="color:var(--muted)">—</div>`;
+
+  // Port editor
+  const portHtml = `
+    <span style="display:inline-flex;align-items:center;gap:4px">
+      :<input class="port-input" id="port-${t.id}" value="${t.local_port}" onkeydown="if(event.key==='Enter')savePort('${t.id}')">
+      <button class="btn btn-ghost btn-sm" onclick="savePort('${t.id}')">save</button>
+    </span>`;
+
+  const startStopBtn = isPending ? '' : isRunning
+    ? `<button class="btn btn-ghost btn-sm" onclick="stopTunnel('${t.id}')">Stop</button>`
+    : `<button class="btn btn-green btn-sm" onclick="startTunnel('${t.id}')" ${isFailed ? '' : ''}>Start</button>`;
+
+  const reproBtn = isFailed
+    ? `<button class="btn btn-ghost btn-sm" onclick="reprovision('${t.id}')">Retry</button>`
+    : '';
+
+  const logsBtn = `<button class="btn btn-ghost btn-sm" onclick="showLogs('${t.id}','${t.name}')">Logs</button>`;
+
+  const deleteBtn = isPending ? '' :
+    `<button class="btn btn-danger btn-sm" onclick="deleteTunnel('${t.id}','${t.name}')">Delete</button>`;
+
+  let bottomBar = '';
+  if (isPending) {
+    bottomBar = `<div class="pending-bar"><span class="spin"></span> Provisioning — connecting to mycrab API, setting up DNS…</div>`;
+  } else if (isFailed) {
+    const err = t.error || 'Unknown error';
+    bottomBar = `<div class="error-bar">
+      <span class="error-text" title="${err}">${err}</span>
+    </div>`;
   }
-}
-function closeCreate(){ document.getElementById('create-modal').classList.remove('open'); resetModal(); }
 
-function resetModal(){
-  document.getElementById('progress').style.display='none';
-  document.getElementById('modal-btns').style.display='flex';
-  document.getElementById('modal-err').style.display='none';
-  const btn=document.getElementById('btn-create');
-  btn.disabled=false; btn.innerHTML='Create tunnel';
-  for(let i=1;i<=4;i++) document.getElementById(`step-${i}`).className='step-item';
+  return `
+  <div class="t-card ${s}" id="card-${t.id}">
+    <div class="t-inner">
+      <div>
+        <div class="t-name">
+          ${t.name}
+          ${tierBadge(t.tier)}
+          ${statusBadge(s)}
+        </div>
+        ${urlHtml}
+        <div class="t-meta">
+          <span>port ${portHtml}</span>
+          ${t.subdomain ? `<span style="font-family:monospace">${t.subdomain}.mycrab.space</span>` : ''}
+        </div>
+      </div>
+      <div class="t-actions">
+        ${reproBtn}
+        ${startStopBtn}
+        ${logsBtn}
+        ${deleteBtn}
+      </div>
+    </div>
+    ${bottomBar}
+  </div>`;
 }
 
-function setStep(n){
-  for(let i=1;i<=4;i++){
-    const el=document.getElementById(`step-${i}`);
-    el.className = i<n?'step-item done':i===n?'step-item active':'step-item';
+async function loadTunnels() {
+  const data = await api('GET', '/api/tunnels');
+  _tunnels = Array.isArray(data) ? data : [];
+
+  const list = document.getElementById('list');
+  if (!_tunnels.length) {
+    list.innerHTML = `<div class="empty">
+      <h3>No tunnels yet</h3>
+      <p>Create your first tunnel to expose a local service via a secure mycrab.space URL.</p>
+      <button class="btn btn-primary" onclick="openCreate()">Create tunnel</button>
+    </div>`;
+  } else {
+    list.innerHTML = _tunnels.map(renderTunnel).join('');
   }
+
+  // Header pill
+  const running = _tunnels.filter(t => t.status === 'running').length;
+  const pending = _tunnels.filter(t => t.status === 'pending').length;
+  const pill = document.getElementById('hdr-pill');
+  const txt = document.getElementById('hdr-text');
+  if (running > 0) {
+    pill.className = 'pill running';
+    txt.textContent = `${running} running`;
+    document.getElementById('hdr-pill').querySelector('.dot').classList.add('pulse');
+  } else {
+    pill.className = 'pill idle';
+    txt.textContent = 'No active tunnels';
+  }
+
+  // Stats
+  document.getElementById('s-total').textContent = _tunnels.length;
+  document.getElementById('s-running').textContent = running;
+  document.getElementById('s-stopped').textContent = _tunnels.filter(t => t.status === 'stopped').length;
+
+  // Poll faster when pending tunnels exist
+  clearTimeout(_pollTimer);
+  _pollTimer = setTimeout(loadTunnels, pending > 0 ? 3000 : 8000);
 }
 
-async function createTunnel(){
-  const name=document.getElementById('m-name').value.trim()||'My tunnel';
-  const port=parseInt(document.getElementById('m-port').value)||8123;
-  const token=document.getElementById('m-token').value.trim();
-  const btn=document.getElementById('btn-create');
-  btn.disabled=true; btn.innerHTML='<span class="spin"></span> Creating…';
-  document.getElementById('progress').style.display='block';
-  document.getElementById('modal-btns').querySelector('.btn-ghost').style.display='none';
-  document.getElementById('modal-err').style.display='none';
-  setStep(1); await delay(300); setStep(2);
+async function startTunnel(id) {
+  const r = await api('POST', `/api/tunnels/${id}/start`);
+  if (!r.ok) { toast(r.error || 'Failed'); return; }
+  toast('Started'); loadTunnels();
+}
+
+async function stopTunnel(id) {
+  await api('POST', `/api/tunnels/${id}/stop`);
+  toast('Stopped'); loadTunnels();
+}
+
+async function deleteTunnel(id, name) {
+  if (!confirm(`Delete tunnel "${name}"? This cannot be undone.`)) return;
+  await api('DELETE', `/api/tunnels/${id}`);
+  toast('Deleted'); loadTunnels();
+}
+
+async function reprovision(id) {
+  const r = await api('POST', `/api/tunnels/${id}/reprovision`);
+  if (!r.ok) { toast(r.error || 'Failed'); return; }
+  toast('Reprovisioning…'); loadTunnels();
+}
+
+async function savePort(id) {
+  const val = parseInt(document.getElementById(`port-${id}`).value);
+  if (!val || val < 1 || val > 65535) { toast('Invalid port'); return; }
+  await api('PATCH', `/api/tunnels/${id}/port`, {local_port: val});
+  toast('Port updated'); loadTunnels();
+}
+
+function setPort(p) { document.getElementById('m-port').value = p; }
+function clearToken() { document.getElementById('m-token').value = ''; }
+
+function openCreate() {
+  // Pre-fill default token from HA config
+  api('GET', '/api/config').then(c => {
+    if (c.default_token) document.getElementById('m-token').value = c.default_token;
+  });
+  document.getElementById('form-error').style.display = 'none';
+  document.getElementById('create-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('m-name').focus(), 200);
+}
+function closeCreate() { document.getElementById('create-overlay').classList.remove('open'); }
+
+async function submitCreate() {
+  const name = document.getElementById('m-name').value.trim();
+  const port = parseInt(document.getElementById('m-port').value) || 8123;
+  const token = document.getElementById('m-token').value.trim();
+  const btn = document.getElementById('btn-create');
+  const lbl = document.getElementById('create-label');
+  const spin = document.getElementById('create-spin');
+  const errBox = document.getElementById('form-error');
+
+  btn.disabled = true; lbl.textContent = 'Creating…'; spin.style.display = '';
+  errBox.style.display = 'none';
+
   try {
-    const r=await fetch(api('/api/tunnels'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,local_port:port,token:token||null})});
-    setStep(3);
-    const data=await r.json();
-    if(!r.ok) throw new Error(data.error||'Failed to create tunnel');
-    await delay(400); setStep(4); await delay(300);
-    closeCreate(); await load();
-    if (data.provision_status === 'pending') {
-      toast(`Tunnel requested — provisioning ${data.url}`);
-    } else {
-      toast(`Tunnel ready → ${data.url}`);
-      if (port === 8123) showPanel('ha', document.querySelectorAll('.nav-tab')[1]);
-    }
+    const r = await api('POST', '/api/tunnels', {name, local_port: port, token});
+    if (r.error) { errBox.textContent = r.error; errBox.style.display = 'block'; return; }
+    closeCreate();
+    toast('Tunnel provisioning started…');
+    loadTunnels();
   } catch(e) {
-    document.getElementById('modal-err').textContent=e.message;
-    document.getElementById('modal-err').style.display='block';
-    btn.disabled=false; btn.innerHTML='Try again';
-    document.getElementById('modal-btns').querySelector('.btn-ghost').style.display='';
+    errBox.textContent = 'Network error'; errBox.style.display = 'block';
+  } finally {
+    btn.disabled = false; lbl.textContent = 'Create tunnel'; spin.style.display = 'none';
   }
 }
 
-async function startTunnel(id){
-  const r = await fetch(api(`/api/tunnels/${id}/start`),{method:'POST'});
-  const d = await r.json();
-  if (!r.ok) { toast(d.error||'Start failed'); return; }
-  if (!d.ok) { toast('Config missing — tunnel cannot start'); return; }
-  await load();
+async function showLogs(id, name) {
+  _logsId = id;
+  document.getElementById('logs-title').textContent = name;
+  document.getElementById('logs-overlay').classList.add('open');
+  await refreshLogs();
 }
-async function stopTunnel(id){
-  await fetch(api(`/api/tunnels/${id}/stop`),{method:'POST'});
-  await load();
+function closeLogs() { document.getElementById('logs-overlay').classList.remove('open'); _logsId = null; }
+async function refreshLogs() {
+  if (!_logsId) return;
+  const r = await api('GET', `/api/tunnels/${_logsId}/logs`);
+  const pre = document.getElementById('logs-pre');
+  pre.textContent = (r.lines || []).join('\n') || '(no logs yet)';
+  pre.scrollTop = pre.scrollHeight;
 }
-async function deleteTunnel(id,name){
-  if(!confirm(`Delete tunnel "${name}"?\nThis stops it and removes the configuration.`)) return;
-  await fetch(api(`/api/tunnels/${id}`),{method:'DELETE'}); await load();
-}
-function copyUrl(url){ navigator.clipboard.writeText(url).then(()=>toast('URL copied!')).catch(()=>{}); }
-function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }
-function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-load();
-setInterval(load, 8000);
-document.addEventListener('keydown',e=>{ if(e.key==='Escape')closeCreate(); if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openCreate();} });
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeCreate(); closeLogs(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openCreate(); }
+});
+
+loadTunnels();
 </script>
 </body>
 </html>
