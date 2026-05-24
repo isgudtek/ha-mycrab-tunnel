@@ -280,16 +280,23 @@ async def provision_paid(token: str, name: str, local_port: int) -> dict:
 # ── Health monitor ────────────────────────────────────────────────────
 
 async def _health_monitor():
-    """Restart cloudflared processes that die unexpectedly."""
+    """Restart crashed cloudflared processes; auto-stop free tunnels after 61 minutes."""
     await asyncio.sleep(30)
     while True:
+        now = int(time.time())
         tunnels = load_tunnels()
         for t in tunnels:
             if t.get("provision_status") != "live":
                 continue
+            # Auto-expire free tunnels at 61+ minutes — stop process, leave record for Delete
+            if t.get("tier") == "free":
+                age_mins = (now - t.get("created_at", now)) / 60
+                if age_mins >= 61:
+                    _stop_proc(t["id"])
+                    continue
+            # Restart crashed paid/live tunnels
             proc = _procs.get(t["id"])
             if proc and proc.poll() is not None:
-                # Process died — restart
                 _start_proc(t)
         await asyncio.sleep(30)
 

@@ -100,6 +100,18 @@
   .port-dot.down { background: var(--muted); }
   .port-dot.checking { background: var(--orange); animation: pulse 1.2s infinite; }
 
+  /* online/offline label next to dot */
+  .port-label { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 4px; letter-spacing: .04em; margin-left: 3px; }
+  .port-label.up   { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
+  .port-label.down { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  /* age badge for free tunnels */
+  .age-badge { font-size: 10px; font-family: monospace; padding: 1px 6px; border-radius: 4px; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .age-badge.expired { background: rgba(239,68,68,.1); color: var(--red); border-color: rgba(239,68,68,.2); }
+
+  /* expired tunnel card */
+  .t-card.expired { opacity: .5; filter: grayscale(.4); }
+
   /* btn busy state */
   .btn.busy { opacity: .6; cursor: wait; pointer-events: none; }
 
@@ -293,51 +305,72 @@ function renderTunnel(t) {
   const isFailed  = s === 'failed';
   const isStopped = s === 'stopped';
 
+  // Age + expiry for free tunnels
+  const isFree = t.tier === 'free';
+  const now = Math.floor(Date.now() / 1000);
+  const ageMins = isFree && t.created_at ? Math.floor((now - t.created_at) / 60) : 0;
+  const isExpired = isFree && ageMins >= 61;
+
   const urlHtml = t.url
     ? `<div class="t-url"><a href="${t.url}" target="_blank">${t.url}</a></div>`
     : `<div class="t-url" style="color:var(--muted)">—</div>`;
 
-  // Port editor — locked while running
-  const portLocked = isRunning || isPending;
+  // Port editor — locked while running or expired
+  const portLocked = isRunning || isPending || isExpired;
   const portHtml = `
     <span style="display:inline-flex;align-items:center;gap:4px">
       :<input class="port-input" id="port-${t.id}" value="${t.local_port}"
         ${portLocked ? 'disabled title="Stop the tunnel before changing the port"' : `onkeydown="if(event.key==='Enter')savePort('${t.id}')"`}>
       ${portLocked ? '' : `<button class="btn btn-ghost btn-sm" onclick="savePort('${t.id}')">save</button>`}
       <span class="port-dot checking" id="pdot-${t.id}" title="Checking local port…"></span>
+      <span class="port-label" id="plabel-${t.id}"></span>
     </span>`;
 
-  const startStopBtn = isPending ? '' : isRunning
-    ? `<button class="btn btn-ghost btn-sm" id="ss-${t.id}" onclick="doStop('${t.id}', this)">Stop</button>`
-    : `<button class="btn btn-green btn-sm" id="ss-${t.id}" onclick="doStart('${t.id}', this)">Start</button>`;
+  // Buttons — expired tunnels: Delete only
+  let startStopBtn = '';
+  if (!isExpired) {
+    startStopBtn = isPending ? '' : isRunning
+      ? `<button class="btn btn-ghost btn-sm" id="ss-${t.id}" onclick="doStop('${t.id}', this)">Stop</button>`
+      : `<button class="btn btn-green btn-sm" id="ss-${t.id}" onclick="doStart('${t.id}', this)">Start</button>`;
+  }
 
-  const reproBtn = isFailed
+  const reproBtn = isFailed && !isExpired
     ? `<button class="btn btn-ghost btn-sm" onclick="reprovision('${t.id}')">Retry</button>`
     : '';
 
-  const logsBtn = `<button class="btn btn-ghost btn-sm" onclick="showLogs('${t.id}','${t.name}')">Logs</button>`;
+  const logsBtn = !isExpired
+    ? `<button class="btn btn-ghost btn-sm" onclick="showLogs('${t.id}','${t.name}')">Logs</button>`
+    : '';
 
   const deleteBtn = isPending ? '' :
     `<button class="btn btn-danger btn-sm" onclick="deleteTunnel('${t.id}','${t.name}')">Delete</button>`;
 
+  // Age badge
+  const ageBadge = isFree && t.created_at
+    ? `<span class="age-badge${isExpired ? ' expired' : ''}">${isExpired ? `${ageMins}m — expired` : `${ageMins}m`}</span>`
+    : '';
+
   let bottomBar = '';
   if (isPending) {
     bottomBar = `<div class="pending-bar"><span class="spin"></span> Provisioning — connecting to mycrab API, setting up DNS…</div>`;
-  } else if (isFailed) {
+  } else if (isFailed && !isExpired) {
     const err = t.error || 'Unknown error';
     bottomBar = `<div class="error-bar">
       <span class="error-text" title="${err}">${err}</span>
     </div>`;
   }
 
+  const cardClass = isExpired ? `${s} expired` : s;
+
   return `
-  <div class="t-card ${s}" id="card-${t.id}">
+  <div class="t-card ${cardClass}" id="card-${t.id}">
     <div class="t-inner">
       <div>
         <div class="t-name">
           ${t.name}
           ${tierBadge(t.tier)}
           ${statusBadge(s)}
+          ${ageBadge}
         </div>
         ${urlHtml}
         <div class="t-meta">
@@ -382,14 +415,18 @@ function renderTunnels() {
 
 async function checkPortHealth(id, port) {
   const dot = document.getElementById(`pdot-${id}`);
+  const lbl = document.getElementById(`plabel-${id}`);
   if (!dot) return;
   try {
     const r = await api('GET', `api/tunnels/${id}/port-check`);
-    dot.className = 'port-dot ' + (r.up ? 'up' : 'down');
-    dot.title = r.up ? `Port ${port} is reachable` : `Port ${port} not responding`;
+    const up = r.up;
+    dot.className = 'port-dot ' + (up ? 'up' : 'down');
+    dot.title = up ? `Port ${port} is reachable` : `Port ${port} not responding`;
+    if (lbl) { lbl.textContent = up ? 'online' : 'offline'; lbl.className = 'port-label ' + (up ? 'up' : 'down'); }
   } catch(e) {
     dot.className = 'port-dot down';
     dot.title = 'Could not check port';
+    if (lbl) { lbl.textContent = 'offline'; lbl.className = 'port-label down'; }
   }
 }
 
