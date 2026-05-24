@@ -295,20 +295,40 @@ async def _health_monitor():
 
 # ── Routes ───────────────────────────────────────────────────────────
 
+def _safe_json(obj) -> str:
+    """JSON-encode obj safe for embedding inside a <script> tag."""
+    return (
+        json.dumps(obj)
+        .replace("</", r"<\/")          # prevent </script> break
+        .replace(" ", r" ")   # JS line separator
+        .replace(" ", r" ")   # JS paragraph separator
+    )
+
+
 async def ui(request):
-    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+    # Strip both leading & trailing slash so the client-side can safely add one.
+    ingress_path = request.headers.get("X-Ingress-Path", "").strip("/")
+    base = ("/" + ingress_path) if ingress_path else ""
+
     tunnels = load_tunnels()
     for t in tunnels:
         t["status"] = tunnel_status(t)
+
     html = (Path(__file__).parent / "templates" / "index.html").read_text()
+
+    # Inject AFTER </style> so variables are available but DOM is not yet parsed —
+    # the body script will do the actual render once DOM is ready.
     inject = (
-        f'<script>'
-        f'window._BASE="{ingress_path}/";'
-        f'window._INIT={json.dumps(tunnels)};'
+        f'<script id="__cfg" type="application/json">'
+        f'{{"base":"{base}","tunnels":{_safe_json(tunnels)}}}'
         f'</script>'
     )
-    html = html.replace("</head>", inject + "</head>")
-    return web.Response(text=html, content_type="text/html")
+    html = html.replace("</head>", inject + "\n</head>")
+    return web.Response(
+        text=html,
+        content_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def api_tunnels(request):
