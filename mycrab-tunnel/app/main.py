@@ -296,7 +296,12 @@ async def _health_monitor():
 # ── Routes ───────────────────────────────────────────────────────────
 
 async def ui(request):
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
     html = (Path(__file__).parent / "templates" / "index.html").read_text()
+    html = html.replace(
+        "</head>",
+        f'<script>window._BASE="{ingress_path}/";</script></head>'
+    )
     return web.Response(text=html, content_type="text/html")
 
 
