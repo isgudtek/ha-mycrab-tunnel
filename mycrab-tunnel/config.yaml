@@ -1,5 +1,5 @@
 name: mycrab Tunnel
-version: "1.1.0"
+version: "1.1.1"
 slug: mycrab_tunnel
 description: Expose Home Assistant and local services via mycrab.space tunnels — no port forwarding, no Cloudflare account needed.
 url: https://mycrab.space
