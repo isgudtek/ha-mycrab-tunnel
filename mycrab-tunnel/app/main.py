@@ -67,7 +67,8 @@ def _start_proc(t: dict) -> bool:
     cfg = _cf_config_path(t["id"])
     if not cfg.exists():
         return False
-    _stop_proc(t["id"])  # kill stale process if any
+    _stop_proc(t["id"])
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     log = open(_log_path(t["id"]), "a")
     log.write(f"\n--- started {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} ---\n")
     log.flush()
@@ -455,7 +456,10 @@ async def api_config(request):
 async def on_startup(app):
     for t in load_tunnels():
         if t.get("provision_status") == "live":
-            _start_proc(t)
+            try:
+                _start_proc(t)
+            except Exception as e:
+                print(f"[warn] could not resume {t['id']}: {e}")
     asyncio.create_task(_health_monitor())
 
 
@@ -464,6 +468,7 @@ app.on_startup.append(on_startup)
 
 app.router.add_get("/", ui)
 app.router.add_get("/ui", ui)
+app.router.add_get("/ping", lambda r: web.Response(text="pong"))
 app.router.add_get("/api/tunnels", api_tunnels)
 app.router.add_post("/api/tunnels", api_create)
 app.router.add_post("/api/tunnels/{id}/start", api_start)
