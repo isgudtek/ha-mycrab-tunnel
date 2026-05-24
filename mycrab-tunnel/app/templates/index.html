@@ -92,6 +92,16 @@
 
   .port-input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 3px 8px; font-size: 11px; font-family: monospace; width: 72px; outline: none; }
   .port-input:focus { border-color: var(--accent); }
+  .port-input:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* port health dot */
+  .port-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; flex-shrink: 0; }
+  .port-dot.up   { background: var(--green); }
+  .port-dot.down { background: var(--muted); }
+  .port-dot.checking { background: var(--orange); animation: pulse 1.2s infinite; }
+
+  /* btn busy state */
+  .btn.busy { opacity: .6; cursor: wait; pointer-events: none; }
 
   .empty { text-align: center; padding: 56px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
   .empty h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
@@ -287,16 +297,19 @@ function renderTunnel(t) {
     ? `<div class="t-url"><a href="${t.url}" target="_blank">${t.url}</a></div>`
     : `<div class="t-url" style="color:var(--muted)">—</div>`;
 
-  // Port editor
+  // Port editor — locked while running
+  const portLocked = isRunning || isPending;
   const portHtml = `
     <span style="display:inline-flex;align-items:center;gap:4px">
-      :<input class="port-input" id="port-${t.id}" value="${t.local_port}" onkeydown="if(event.key==='Enter')savePort('${t.id}')">
-      <button class="btn btn-ghost btn-sm" onclick="savePort('${t.id}')">save</button>
+      :<input class="port-input" id="port-${t.id}" value="${t.local_port}"
+        ${portLocked ? 'disabled title="Stop the tunnel before changing the port"' : `onkeydown="if(event.key==='Enter')savePort('${t.id}')"`}>
+      ${portLocked ? '' : `<button class="btn btn-ghost btn-sm" onclick="savePort('${t.id}')">save</button>`}
+      <span class="port-dot checking" id="pdot-${t.id}" title="Checking local port…"></span>
     </span>`;
 
   const startStopBtn = isPending ? '' : isRunning
-    ? `<button class="btn btn-ghost btn-sm" onclick="stopTunnel('${t.id}')">Stop</button>`
-    : `<button class="btn btn-green btn-sm" onclick="startTunnel('${t.id}')" ${isFailed ? '' : ''}>Start</button>`;
+    ? `<button class="btn btn-ghost btn-sm" id="ss-${t.id}" onclick="doStop('${t.id}', this)">Stop</button>`
+    : `<button class="btn btn-green btn-sm" id="ss-${t.id}" onclick="doStart('${t.id}', this)">Start</button>`;
 
   const reproBtn = isFailed
     ? `<button class="btn btn-ghost btn-sm" onclick="reprovision('${t.id}')">Retry</button>`
@@ -367,6 +380,19 @@ function renderTunnels() {
   return pending;
 }
 
+async function checkPortHealth(id, port) {
+  const dot = document.getElementById(`pdot-${id}`);
+  if (!dot) return;
+  try {
+    const r = await api('GET', `api/tunnels/${id}/port-check`);
+    dot.className = 'port-dot ' + (r.up ? 'up' : 'down');
+    dot.title = r.up ? `Port ${port} is reachable` : `Port ${port} not responding`;
+  } catch(e) {
+    dot.className = 'port-dot down';
+    dot.title = 'Could not check port';
+  }
+}
+
 async function loadTunnels() {
   clearTimeout(_pollTimer);
   try {
@@ -377,19 +403,40 @@ async function loadTunnels() {
     return;
   }
   const pending = renderTunnels();
+  // Check local port health for each provisioned tunnel
+  _tunnels.filter(t => t.provision_status === 'live' || !t.provision_status)
+    .forEach(t => checkPortHealth(t.id, t.local_port));
   _pollTimer = setTimeout(loadTunnels, pending > 0 ? 3000 : 8000);
 }
 
-async function startTunnel(id) {
-  const r = await api('POST', `/api/tunnels/${id}/start`);
-  if (!r.ok) { toast(r.error || 'Failed'); return; }
-  toast('Started'); loadTunnels();
+function _setBusy(btn, label) {
+  btn.classList.add('busy');
+  btn.dataset.orig = btn.textContent;
+  btn.innerHTML = `<span class="spin" style="width:10px;height:10px;border-width:2px"></span> ${label}`;
+}
+function _clearBusy(btn) {
+  btn.classList.remove('busy');
+  btn.textContent = btn.dataset.orig || btn.textContent;
 }
 
-async function stopTunnel(id) {
+async function doStart(id, btn) {
+  _setBusy(btn, 'Starting…');
+  const r = await api('POST', `/api/tunnels/${id}/start`);
+  _clearBusy(btn);
+  if (!r.ok) { toast(r.error || 'Failed'); return; }
+  toast('Starting…'); loadTunnels();
+}
+
+async function doStop(id, btn) {
+  _setBusy(btn, 'Stopping…');
   await api('POST', `/api/tunnels/${id}/stop`);
+  _clearBusy(btn);
   toast('Stopped'); loadTunnels();
 }
+
+// keep old names for reprovision flow
+async function startTunnel(id) { const btn = document.getElementById(`ss-${id}`); if(btn) await doStart(id,btn); else { await api('POST',`/api/tunnels/${id}/start`); loadTunnels(); } }
+async function stopTunnel(id)  { const btn = document.getElementById(`ss-${id}`); if(btn) await doStop(id,btn);  else { await api('POST',`/api/tunnels/${id}/stop`);  loadTunnels(); } }
 
 async function deleteTunnel(id, name) {
   if (!confirm(`Delete tunnel "${name}"? This cannot be undone.`)) return;

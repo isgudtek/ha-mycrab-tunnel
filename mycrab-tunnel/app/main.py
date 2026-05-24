@@ -434,6 +434,23 @@ async def api_logs(request):
     return web.json_response({"lines": lines})
 
 
+async def api_port_check(request):
+    tid = request.match_info["id"]
+    tunnels = load_tunnels()
+    t = next((x for x in tunnels if x["id"] == tid), None)
+    if not t:
+        return web.json_response({"up": False})
+    port = t.get("local_port", 8123)
+    import socket
+    try:
+        sock = socket.create_connection((HOST_ADDR, port), timeout=1.5)
+        sock.close()
+        up = True
+    except Exception:
+        up = False
+    return web.json_response({"up": up, "port": port})
+
+
 async def api_status(request):
     tunnels = load_tunnels()
     statuses = [tunnel_status(t) for t in tunnels]
@@ -477,6 +494,7 @@ app.router.add_post("/api/tunnels/{id}/reprovision", api_reprovision)
 app.router.add_patch("/api/tunnels/{id}/port", api_update_port)
 app.router.add_delete("/api/tunnels/{id}", api_delete)
 app.router.add_get("/api/tunnels/{id}/logs", api_logs)
+app.router.add_get("/api/tunnels/{id}/port-check", api_port_check)
 app.router.add_post("/api/tunnels/purge-expired", lambda r: web.json_response({"ok": True}))
 app.router.add_get("/api/status", api_status)
 app.router.add_get("/api/config", api_config)
